@@ -11,11 +11,20 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json as _json
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal
 
+import anyio
 from claude_agent_sdk import query
+from claude_agent_sdk._errors import CLIConnectionError as _CLIConnectionError
+from claude_agent_sdk._errors import CLIJSONDecodeError as _CLIJSONDecodeError
+from claude_agent_sdk._errors import ProcessError as _ProcessError
+from claude_agent_sdk._internal.transport.subprocess_cli import (
+    SubprocessCLITransport as _BaseCLITransport,
+)
 from claude_agent_sdk.types import (
     AssistantMessage,
     ClaudeAgentOptions,
@@ -26,6 +35,73 @@ from claude_agent_sdk.types import (
 from loguru import logger
 
 from cli_bridge.engine.adapter import SessionMappingManager
+
+
+class _FixedSubprocessCLITransport(_BaseCLITransport):
+    """Extends SubprocessCLITransport to skip non-JSON lines like 'init done'.
+
+    Claude outputs 'init done\\n' (plain text) to stdout before the first JSON
+    message. The parent class accumulates this into the JSON buffer, causing
+    subsequent control_response JSON to be unparseable (since the buffer becomes
+    'init done{...}' which is not valid JSON). This subclass resets the buffer
+    whenever it detects a non-JSON prefix, allowing the protocol to work.
+    """
+
+    async def _read_messages_impl(self):  # type: ignore[override]
+        if not self._process or not self._stdout_stream:
+            raise _CLIConnectionError("Not connected")
+
+        json_buffer = ""
+
+        try:
+            async for line in self._stdout_stream:
+                line_str = line.strip()
+                if not line_str:
+                    continue
+
+                for json_line in line_str.split("\n"):
+                    json_line = json_line.strip()
+                    if not json_line:
+                        continue
+
+                    # Reset buffer if it contains non-JSON garbage (e.g. "init done")
+                    if json_buffer and json_buffer[0] not in "{[":
+                        json_buffer = ""
+
+                    json_buffer += json_line
+
+                    if len(json_buffer) > self._max_buffer_size:
+                        buf_len = len(json_buffer)
+                        json_buffer = ""
+                        raise _CLIJSONDecodeError(
+                            f"JSON message exceeded maximum buffer size of {self._max_buffer_size} bytes",
+                            ValueError(f"Buffer size {buf_len} exceeds limit {self._max_buffer_size}"),
+                        )
+
+                    try:
+                        data = _json.loads(json_buffer)
+                        json_buffer = ""
+                        yield data
+                    except _json.JSONDecodeError:
+                        continue
+
+        except anyio.ClosedResourceError:
+            pass
+        except GeneratorExit:
+            pass
+
+        try:
+            returncode = await self._process.wait()
+        except Exception:
+            returncode = -1
+
+        if returncode is not None and returncode != 0:
+            self._exit_error = _ProcessError(
+                f"Command failed with exit code {returncode}",
+                exit_code=returncode,
+                stderr="Check stderr output for details",
+            )
+            raise self._exit_error
 
 
 class ClaudeAdapterError(Exception):
@@ -105,6 +181,7 @@ class ClaudeAdapter:
             system_prompt=system_prompt_opt,
             max_turns=self.max_turns if self.max_turns > 0 else None,
             resume=session_id,
+            env={"NODE_TLS_REJECT_UNAUTHORIZED": "0", "CLAUDECODE": ""},
         )
 
     async def _run(
@@ -122,9 +199,11 @@ class ClaudeAdapter:
         effective_timeout = timeout or self.timeout
         result_text = ""
 
+        transport = _FixedSubprocessCLITransport(prompt=message, options=options)
+
         async def _consume() -> None:
             nonlocal result_text
-            async for msg in query(prompt=message, options=options):
+            async for msg in query(prompt=message, options=options, transport=transport):
                 if isinstance(msg, AssistantMessage):
                     for block in msg.content:
                         if isinstance(block, TextBlock):

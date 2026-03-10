@@ -194,3 +194,36 @@ async def test_health_check_returns_true_when_claude_found(tmp_path):
 def test_mode_is_claude(tmp_path):
     adapter = ClaudeAdapter(workspace=tmp_path)
     assert adapter.mode == "claude"
+
+
+# ── NODE_TLS_REJECT_UNAUTHORIZED ──────────────────────────────────────────────
+
+async def test_build_options_sets_node_tls_reject_unauthorized(tmp_path):
+    """claude subprocess must bypass SSL cert verification (corporate MITM proxy)."""
+    adapter = ClaudeAdapter(workspace=tmp_path)
+    options = adapter._build_options("feishu", "ou_123")
+    assert options.env.get("NODE_TLS_REJECT_UNAUTHORIZED") == "0"
+
+
+async def test_build_options_clears_claudecode(tmp_path):
+    """CLAUDECODE must be unset so claude subprocess doesn't refuse to start
+    when launched from inside a Claude Code session."""
+    adapter = ClaudeAdapter(workspace=tmp_path)
+    options = adapter._build_options("feishu", "ou_123")
+    assert options.env.get("CLAUDECODE") == ""
+
+
+async def test_build_options_node_tls_env_passed_to_query(tmp_path):
+    """Verify NODE_TLS_REJECT_UNAUTHORIZED reaches the query() call."""
+    adapter = ClaudeAdapter(workspace=tmp_path)
+    captured_env = {}
+
+    async def mock_q(*, prompt, options=None, transport=None):
+        captured_env.update(options.env if options else {})
+        yield ResultMessage(subtype="success", duration_ms=100, duration_api_ms=50,
+                            is_error=False, num_turns=1, session_id="s", result="ok")
+
+    with patch("cli_bridge.engine.claude_adapter.query", new=mock_q):
+        await adapter.chat("hi", "feishu", "ou_123")
+
+    assert captured_env.get("NODE_TLS_REJECT_UNAUTHORIZED") == "0"

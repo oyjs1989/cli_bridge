@@ -379,6 +379,26 @@ class FeishuChannel(BaseChannel):
         def run_ws() -> None:
             import time
             import asyncio
+            import ssl as _ssl
+            import websockets
+            import websockets.asyncio.client as _ws_asyncio_client
+
+            # 当 ssl_verify=False 时（如企业 MITM 代理环境），patch websockets.connect
+            # 注入不验证证书的 SSL 上下文，同时覆盖 proxy_ssl 以处理代理自签名证书
+            if not self.config.ssl_verify:
+                _unverified_ctx = _ssl.create_default_context()
+                _unverified_ctx.check_hostname = False
+                _unverified_ctx.verify_mode = _ssl.CERT_NONE
+                _orig_connect = _ws_asyncio_client.connect
+
+                def _patched_connect(uri, *args, **kwargs):
+                    if uri.startswith("wss://"):
+                        kwargs.setdefault("ssl", _unverified_ctx)
+                    return _orig_connect(uri, *args, **kwargs)
+
+                _ws_asyncio_client.connect = _patched_connect
+                websockets.connect = _patched_connect
+
             while self._running:
                 try:
                     # 关键修复：lark_oapi/ws/client.py 在模块级别调用 asyncio.get_event_loop()

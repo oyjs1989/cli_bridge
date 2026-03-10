@@ -1,12 +1,12 @@
 [project]
 name = "cli-bridge"
 version = "0.3.5"
-description = "Multi-channel AI Assistant powered by iflow CLI"
+description = "Multi-channel AI Assistant powered by Claude CLI"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
 authors = [
-    { name = "iFlow Team" }
+    { name = "jasonouyang" }
 ]
 keywords = ["ai", "assistant", "chatbot", "telegram", "discord", "slack"]
 classifiers = [
@@ -74,9 +74,6 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B"]
 ignore = ["E501"]
-
-[tool.uv.sources]
-claude-agent-sdk = { path = "claude-agent-sdk-python", editable = true }
 
 [dependency-groups]
 dev = [

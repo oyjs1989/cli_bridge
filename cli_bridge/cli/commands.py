@@ -456,7 +456,7 @@ def init_workspace(workspace: Path) -> None:
 
 app = typer.Typer(
     name="cli-bridge",
-    help=f"{__logo__} cli-bridge - Multi-channel AI Assistant (powered by iflow)",
+    help=f"{__logo__} cli-bridge - Multi-channel AI Assistant (powered by Claude)",
     no_args_is_help=True,
     add_completion=False,
 )
@@ -474,7 +474,7 @@ def print_banner() -> None:
 | $$| $$      | $$|  $$$$$$/|  $$$$$/$$$$/        | $$$$$$$/|  $$$$$$/  |  $$$$/
 |__/|__/      |__/ \______/  \_____/\___/         |_______/  \______/    \___/                                                                         
                                                                                 
-  Multi-channel AI Assistant (powered by iflow)
+  Multi-channel AI Assistant (powered by Claude)
 """)
 
 
