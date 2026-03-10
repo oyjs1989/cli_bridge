@@ -1,0 +1,56 @@
+name: Windows Auto Install Test
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - 'cli_bridge/cli/commands.py'
+      - '.github/workflows/windows-install-test.yml'
+  pull_request:
+    branches: [master, main]
+    paths:
+      - 'cli_bridge/cli/commands.py'
+      - '.github/workflows/windows-install-test.yml'
+  workflow_dispatch:
+
+env:
+  PYTHONIOENCODING: utf-8
+
+jobs:
+  windows-auto-install:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install cli-bridge
+        run: |
+          pip install -e .
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify npm is available
+        run: |
+          npm --version
+
+      - name: Run cli-bridge onboard to generate config
+        run: |
+          python -m cli_bridge.cli.commands onboard 2>&1 || true
+
+      - name: Run cli-bridge gateway start (triggers auto-install)
+        run: |
+          python -m cli_bridge.cli.commands gateway start 2>&1 || true
+
+      - name: Verify iflow CLI was auto-installed
+        run: |
+          iflow --version
