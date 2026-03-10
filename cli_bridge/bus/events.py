@@ -62,7 +62,7 @@ class OutboundMessage:
     
     Channels that support file sending (e.g. Feishu, Telegram) will
     automatically upload and deliver these files.
-    Ported from feishu-iflow-bridge file callback feature.
+    Ported from cli-bridge file callback feature.
     """
     
     reply_to_id: Optional[str] = None

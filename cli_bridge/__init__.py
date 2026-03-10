@@ -1,4 +1,4 @@
-"""cli-bridge - Multi-channel AI Assistant powered by iflow CLI."""
+"""cli-bridge - Multi-channel AI Assistant powered by Claude CLI."""
 
 __version__ = "0.3.5"
 __logo__ = "🤖"
