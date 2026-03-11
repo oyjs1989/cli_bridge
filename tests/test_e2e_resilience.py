@@ -2,7 +2,6 @@ import asyncio
 from pathlib import Path
 
 import pytest
-from loguru import logger
 
 from cli_bridge.bus.events import InboundMessage, OutboundMessage
 from cli_bridge.bus.queue import MessageBus
@@ -26,6 +25,9 @@ class _TrackingAdapter:
         self.global_active = 0
         self.global_max_active = 0
 
+    def clear_session(self, channel: str, chat_id: str) -> bool:
+        return self.session_mappings.clear_session(channel, chat_id)
+
     async def chat(self, message: str, channel: str, chat_id: str, model: str):
         key = f"{channel}:{chat_id}"
         cur = self.active_per_key.get(key, 0) + 1
@@ -40,7 +42,7 @@ class _TrackingAdapter:
         self.active_per_key[key] -= 1
         return f"ok:{key}"
 
-    async def chat_stream(self, message: str, channel: str, chat_id: str, model: str, on_chunk):
+    async def chat_stream(self, message: str, channel: str, chat_id: str, model: str, on_chunk=None, on_tool_call=None, on_event=None, **kwargs):
         await on_chunk(channel, chat_id, "x")
         return "x"
 

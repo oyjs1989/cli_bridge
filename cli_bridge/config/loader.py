@@ -2,16 +2,39 @@
 
 import json
 from pathlib import Path
-from typing import Optional
 
-from pydantic import ValidationError
 from loguru import logger
+from pydantic import ValidationError
 
 from cli_bridge.config.schema import Config
 
 # 统一的超时常量定义
 DEFAULT_TIMEOUT = 180  # 默认超时时间（秒）
 LEGACY_DEFAULT_TIMEOUT = 300  # 旧版默认值，用于迁移检测
+
+# v1 遗留的扁平化字段（现已移入嵌套的 iflow/claude 配置块）
+_LEGACY_FLAT_FIELDS = {
+    "iflow_path", "yolo", "compression_trigger_tokens",
+    "claude_path", "claude_model", "mcp_proxy_enabled",
+    "acp_port", "acp_host", "extra_args", "disable_mcp",
+}
+
+
+class ConfigMigrationError(ValueError):
+    """当检测到 v1 扁平配置格式时抛出。"""
+    pass
+
+
+def _check_for_legacy_config(raw_driver: dict) -> None:
+    """检查 driver 字典中是否存在 v1 遗留字段，若有则抛出 ConfigMigrationError。"""
+    found = [f for f in _LEGACY_FLAT_FIELDS if f in raw_driver]
+    if found:
+        raise ConfigMigrationError(
+            f"Legacy config format detected (v1).\n"
+            f"Found legacy fields: {', '.join(sorted(found))}\n"
+            f"Please migrate your config to v2 format.\n"
+            f"Migration guide: ~/.cli-bridge/docs/config-migration-v2.md"
+        )
 
 
 def get_config_dir() -> Path:
@@ -38,25 +61,28 @@ def get_workspace_path() -> Path:
     return workspace
 
 
-def load_config(config_path: Optional[Path] = None, auto_create: bool = True) -> Config:
+def load_config(config_path: Path | None = None, auto_create: bool = True) -> Config:
     """
     Load configuration from file.
-    
+
     Args:
         config_path: Optional path to config file. If not provided,
                      uses the default path.
         auto_create: If True, create default config file when not exists.
-    
+
     Returns:
         Config object.
     """
     if config_path is None:
         config_path = get_config_path()
-    
+
     if config_path.exists():
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, encoding="utf-8") as f:
                 data = json.load(f)
+            raw_driver = data.get("driver", {})
+            if isinstance(raw_driver, dict):
+                _check_for_legacy_config(raw_driver)
             data, migrated = _migrate_legacy_driver_timeout(data)
             if migrated:
                 _save_raw_config_data(data, config_path)
@@ -66,16 +92,18 @@ def load_config(config_path: Optional[Path] = None, auto_create: bool = True) ->
             config = Config(**data)
             logger.info(f"Loaded config from {config_path}")
             return config
+        except ConfigMigrationError:
+            raise
         except (json.JSONDecodeError, ValidationError) as e:
             logger.warning(f"Invalid config file: {e}. Using defaults.")
     else:
         logger.info("No config file found. Creating default config.")
         config = Config()
         if auto_create:
-            # 创建默认配置文件
-            _create_default_config(config_path)
+            # 创建默认配置文件（根据环境变量中可能的 mode 偏好生成对应格式）
+            _create_default_config(config_path, mode=config.driver.mode)
         return config
-    
+
     return Config()
 
 
@@ -110,24 +138,66 @@ def _save_raw_config_data(data: dict, config_path: Path) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-def _create_default_config(config_path: Path) -> None:
-    """创建默认配置文件。"""
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    default_config = {
-        "driver": {
-            "mode": "stdio",
-            "acp_port": 8090,
+def _build_iflow_driver_block(mode: str = "stdio") -> dict:
+    """Build the driver config block for iflow-based modes (cli/stdio/acp)."""
+    return {
+        "mode": mode,
+        "max_turns": 40,
+        "timeout": DEFAULT_TIMEOUT,
+        "workspace": str(Path.home() / ".cli-bridge" / "workspace"),
+        "iflow": {
             "iflow_path": "iflow",
             "model": "minimax-m2.5",
             "yolo": True,
             "thinking": False,
-            "max_turns": 40,
-            "timeout": DEFAULT_TIMEOUT,
+            "extra_args": [],
             "compression_trigger_tokens": 60000,
-            "workspace": str(Path.home() / ".cli-bridge" / "workspace"),
-            "extra_args": []
+            "acp_host": "localhost",
+            "acp_port": 8090,
+            "disable_mcp": False,
+            "mcp_proxy_enabled": True,
+            "mcp_proxy_port": 8888,
+            "mcp_proxy_auto_start": True,
+            "mcp_servers_auto_discover": True,
+            "mcp_servers_max": 10,
+            "mcp_servers_allowlist": [],
+            "mcp_servers_blocklist": [],
         },
+    }
+
+
+def _build_claude_driver_block() -> dict:
+    """Build the driver config block for claude mode (no iflow fields)."""
+    return {
+        "mode": "claude",
+        "max_turns": 40,
+        "timeout": DEFAULT_TIMEOUT,
+        "workspace": str(Path.home() / ".cli-bridge" / "workspace"),
+        "claude": {
+            "claude_path": "claude",
+            "model": "claude-opus-4-6",
+            "system_prompt": "",
+            "permission_mode": "bypassPermissions",
+        },
+    }
+
+
+def _create_default_config(config_path: Path, mode: str = "stdio") -> None:
+    """创建默认配置文件。
+
+    根据 mode 生成对应的后端配置块：
+    - mode == "claude": 仅包含 driver.claude，不含 driver.iflow
+    - 其他 (cli/stdio/acp): 仅包含 driver.iflow，不含 driver.claude
+    """
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if mode == "claude":
+        driver_block = _build_claude_driver_block()
+    else:
+        driver_block = _build_iflow_driver_block(mode)
+
+    default_config = {
+        "driver": driver_block,
         "channels": {
             "telegram": {
                 "enabled": False,
@@ -230,17 +300,17 @@ def _create_default_config(config_path: Path) -> None:
         "log_level": "INFO",
         "log_file": ""
     }
-    
+
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(default_config, f, indent=2, ensure_ascii=False)
-    
+
     logger.info(f"Created default config at {config_path}")
 
 
-def save_config(config: Config, config_path: Optional[Path] = None) -> None:
+def save_config(config: Config, config_path: Path | None = None) -> None:
     """
     Save configuration to file.
-    
+
     Args:
         config: Config object to save.
         config_path: Optional path to config file. If not provided,
@@ -248,12 +318,12 @@ def save_config(config: Config, config_path: Optional[Path] = None) -> None:
     """
     if config_path is None:
         config_path = get_config_path()
-    
+
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config.model_dump(), f, indent=2, ensure_ascii=False)
-    
+
     logger.info(f"Saved config to {config_path}")
 
 

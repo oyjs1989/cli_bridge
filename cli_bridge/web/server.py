@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import os
 import platform
-import uuid
-import asyncio
-import logging
 import re
-from datetime import datetime
+import uuid
 from collections import deque
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
@@ -311,7 +311,7 @@ class ConsoleService:
         self.channel_dir = get_channel_dir()
         self.pid_file = self.home_dir / "gateway.pid"
         self.log_file = self.home_dir / "gateway.log"
-        self._chat_adapter: Optional[IFlowAdapter] = None
+        self._chat_adapter: IFlowAdapter | None = None
         self._chat_lock = asyncio.Lock()
         self._web_chat_messages: dict[str, list[dict[str, str]]] = {}
         self._web_log_seq = 0
@@ -362,7 +362,7 @@ class ConsoleService:
         return self.read_gateway_logs_tail(limit=limit, since=since)
 
     def get_gateway_status(self) -> dict[str, Any]:
-        pid: Optional[int] = None
+        pid: int | None = None
         running = False
         if self.pid_file.exists():
             try:
@@ -380,7 +380,7 @@ class ConsoleService:
         # 统一 PID 文件路径
         pid_file = self.home_dir / "mcp_proxy.pid"
 
-        pid: Optional[int] = None
+        pid: int | None = None
         running = False
 
         if pid_file.exists():
@@ -513,7 +513,7 @@ class ConsoleService:
             files = list(channel_dir.glob("*.json"))
             total_messages = 0
             for f in files:
-                total_messages += len((_read_json_file(f).get("messages") or []))
+                total_messages += len(_read_json_file(f).get("messages") or [])
             summary.append(
                 {
                     "name": channel_dir.name,
@@ -557,7 +557,7 @@ class ConsoleService:
         cfg = self.get_config_obj()
         if not hasattr(cfg.channels, channel):
             return False, f"未知渠道: {channel}"
-        setattr(getattr(cfg.channels, channel), "enabled", enabled)
+        getattr(cfg.channels, channel).enabled = enabled
         pretty = json.dumps(cfg.model_dump(), indent=2, ensure_ascii=False)
         self.config_path.write_text(pretty, encoding="utf-8")
         return True, f"{channel} 已{'启用' if enabled else '禁用'}"
@@ -662,7 +662,7 @@ class ConsoleService:
         return Path.home() / ".cli-bridge" / "chat_targets_meta.json"
 
     def _acp_session_file(self, session_id: str) -> Path:
-        return Path.home() / ".iflow" / "acp" / "sessions" / f"{session_id}.json"
+        return Path.home() / ".cli-bridge" / "sessions" / f"{session_id}.json"
 
     def _read_session_mappings(self) -> dict[str, str]:
         path = self._session_mapping_file()
@@ -1280,15 +1280,15 @@ def create_app(token: str | None = None) -> FastAPI:
         if not token:
             return
         supplied = (
-            request.headers.get("x-iflow-console-token")
+            request.headers.get("x-cli-bridge-console-token")
             or request.query_params.get("token")
-            or request.cookies.get("iflow_console_token")
+            or request.cookies.get("cli_bridge_console_token")
         )
         if supplied != token:
             raise HTTPException(status_code=401, detail="Unauthorized")
 
     def _resolve_web_session_id(request: Request) -> str:
-        sid = request.cookies.get("iflow_web_session")
+        sid = request.cookies.get("cli_bridge_web_session")
         if sid:
             return sid
         return uuid.uuid4().hex[:16]
@@ -1375,7 +1375,7 @@ def create_app(token: str | None = None) -> FastAPI:
                 "chat_targets": chat_targets,
             },
         )
-        response.set_cookie("iflow_web_session", session_id, httponly=False, max_age=86400 * 30)
+        response.set_cookie("cli_bridge_web_session", session_id, httponly=False, max_age=86400 * 30)
         return response
 
     @app.post("/api/chat/send")

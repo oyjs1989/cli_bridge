@@ -25,10 +25,13 @@ class _FakeAdapter:
         self._stream_chunks: list[str] = []
         self._stream_response = ""
 
+    def clear_session(self, channel: str, chat_id: str) -> bool:
+        return self.session_mappings.clear_session(channel, chat_id)
+
     async def chat(self, message: str, channel: str, chat_id: str, model: str):
         return "ok"
 
-    async def chat_stream(self, message: str, channel: str, chat_id: str, model: str, on_chunk):
+    async def chat_stream(self, message: str, channel: str, chat_id: str, model: str, on_chunk=None, on_tool_call=None, on_event=None, **kwargs):
         for chunk in self._stream_chunks:
             await on_chunk(channel, chat_id, chunk)
         return self._stream_response

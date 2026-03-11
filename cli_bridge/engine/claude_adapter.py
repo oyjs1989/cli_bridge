@@ -13,9 +13,8 @@ import asyncio
 import inspect
 import json as _json
 from collections.abc import Callable
-from contextlib import suppress
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import anyio
 from claude_agent_sdk import query
@@ -35,6 +34,7 @@ from claude_agent_sdk.types import (
 from loguru import logger
 
 from cli_bridge.engine.adapter import SessionMappingManager
+from cli_bridge.engine.base_adapter import BaseAdapter
 
 
 class _FixedSubprocessCLITransport(_BaseCLITransport):
@@ -115,7 +115,7 @@ async def _call_callback(cb: Callable, *args: Any) -> None:
         await result
 
 
-class ClaudeAdapter:
+class ClaudeAdapter(BaseAdapter):
     """Claude Code SDK adapter.
 
     Uses claude-agent-sdk-python to communicate with claude binary.
@@ -126,7 +126,9 @@ class ClaudeAdapter:
     subsequent calls.
     """
 
-    mode: Literal["claude"] = "claude"
+    @property
+    def mode(self) -> str:
+        return "claude"
 
     def __init__(
         self,

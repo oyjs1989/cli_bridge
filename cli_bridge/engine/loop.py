@@ -252,22 +252,7 @@ time: {now}
                 if msg.content.strip().lower() in ["/new", "/start"]:
                     cleared = False
                     try:
-                        mode = getattr(self.adapter, "mode", "cli")
-                        if mode == "claude":
-                            # ClaudeAdapter.clear_session() is called directly (no inner adapter)
-                            cleared = self.adapter.clear_session(msg.channel, msg.chat_id)
-                        elif mode in {"stdio", "acp"}:
-                            # IFlowAdapter wraps inner adapter — must clear at the inner layer
-                            if mode == "stdio":
-                                stdio_adapter = await self.adapter._get_stdio_adapter()
-                                cleared = stdio_adapter.clear_session(msg.channel, msg.chat_id)
-                            else:
-                                acp_adapter = await self.adapter._get_acp_adapter()
-                                cleared = acp_adapter.clear_session(msg.channel, msg.chat_id)
-                        else:
-                            cleared = self.adapter.session_mappings.clear_session(
-                                msg.channel, msg.chat_id
-                            )
+                        cleared = self.adapter.clear_session(msg.channel, msg.chat_id)
                     except Exception as e:
                         logger.warning(
                             f"Failed to clear session for {msg.channel}:{msg.chat_id}: {e}"

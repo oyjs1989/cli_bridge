@@ -1,4 +1,3 @@
-from pathlib import Path
 
 from cli_bridge.engine.stdio_acp import StdioACPAdapter
 
@@ -9,6 +8,7 @@ def test_stdio_clear_session_clears_all_runtime_state(tmp_path):
 
     adapter = StdioACPAdapter(workspace=workspace)
     adapter._session_map_file = tmp_path / "session_mappings.json"
+    adapter._session_map.clear()  # discard any real sessions loaded from ~/.cli-bridge
 
     key = "feishu:ou_test"
     session_id = "session-123"
