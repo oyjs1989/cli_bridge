@@ -182,6 +182,43 @@ class ChannelsConfig(BaseModel):
 
 
 # ============================================================================
+# MCP 代理配置（后端无关）
+# ============================================================================
+
+
+class MCPProxyConfig(BaseModel):
+    """统一 MCP 代理配置（后端无关）。
+
+    当 enabled=True 时，网关启动时根据后端类型处理 MCP 服务器：
+    - iflow 后端：启动 HTTP 代理进程
+    - claude 后端：读取服务器定义并通过 --mcp-config 参数传递给 claude CLI
+    """
+
+    model_config = {"extra": "ignore"}
+
+    enabled: bool = False
+    """是否启用 MCP 服务器支持。"""
+
+    port: int = 8888
+    """MCP HTTP 代理的端口号（仅 iflow 后端使用）。"""
+
+    auto_start: bool = True
+    """是否在网关启动时自动启动 MCP 代理（仅 iflow 后端使用）。"""
+
+    servers_auto_discover: bool = True
+    """是否自动从运行中的代理发现可用服务器（仅 iflow 后端使用）。"""
+
+    servers_max: int = 10
+    """单个后端实例最多连接的 MCP 服务器数量。"""
+
+    servers_allowlist: list[str] = Field(default_factory=list)
+    """允许使用的 MCP 服务器名称列表（空表示使用所有）。"""
+
+    servers_blocklist: list[str] = Field(default_factory=list)
+    """禁用的 MCP 服务器名称列表（优先级高于 allowlist）。"""
+
+
+# ============================================================================
 # Driver 配置（后端设置）
 # ============================================================================
 
@@ -337,6 +374,9 @@ class Config(BaseSettings):
 
     # 渠道配置
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
+
+    # MCP 代理配置（后端无关）
+    mcp_proxy: MCPProxyConfig = Field(default_factory=MCPProxyConfig)
 
     # 日志
     log_level: str = "INFO"

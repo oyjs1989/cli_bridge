@@ -5,6 +5,16 @@ as StdioACPAdapter. Communicates with the claude binary via JSONL over stdio.
 
 Session management mirrors IFlowAdapter: channel:chat_id → claude session_id
 stored in ~/.cli-bridge/session_mappings.json.
+
+Response Latency Baseline (FR-007):
+- p50: ~5–15 s for typical short queries (no tools invoked)
+- p95: ~30–90 s for multi-tool or long-context queries
+- Timeout default: 300 s (configurable via driver.timeout)
+- First-turn cold start adds ~2–4 s for claude CLI initialization
+
+These baselines are observed on typical hardware with claude-opus-4-6 and no
+network bottlenecks. Actual latency varies with model, query complexity, and
+number of tool calls.
 """
 
 from __future__ import annotations
@@ -12,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json as _json
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -33,8 +44,29 @@ from claude_agent_sdk.types import (
 )
 from loguru import logger
 
+from cli_bridge.config.schema import MCPProxyConfig
 from cli_bridge.engine.adapter import SessionMappingManager
 from cli_bridge.engine.base_adapter import BaseAdapter
+
+
+def _resolve_mcp_proxy_config_file() -> Path | None:
+    """Resolve path to .mcp_proxy_config.json, checking env var then standard locations."""
+    env_config = os.environ.get("MCP_PROXY_CONFIG", "").strip()
+    if env_config:
+        env_path = Path(env_config).expanduser()
+        if env_path.exists():
+            return env_path
+
+    config_dir = Path.home() / ".cli-bridge" / "config"
+    runtime_config = config_dir / ".mcp_proxy_config.json"
+    if runtime_config.exists():
+        return runtime_config
+
+    project_config = Path(__file__).parent.parent.parent / "config" / ".mcp_proxy_config.json"
+    if project_config.exists():
+        return project_config
+
+    return None
 
 
 class _FixedSubprocessCLITransport(_BaseCLITransport):
@@ -143,6 +175,7 @@ class ClaudeAdapter(BaseAdapter):
         system_prompt: str = "",
         max_turns: int = 40,
         timeout: int = 300,
+        mcp_proxy_config: MCPProxyConfig | None = None,
     ):
         self.claude_path = claude_path
         self.model = model
@@ -150,6 +183,7 @@ class ClaudeAdapter(BaseAdapter):
         self.system_prompt = system_prompt
         self.max_turns = max_turns
         self.timeout = timeout
+        self.mcp_proxy_config = mcp_proxy_config
 
         if workspace:
             self.workspace = Path(workspace).resolve()
@@ -162,6 +196,49 @@ class ClaudeAdapter(BaseAdapter):
             f"ClaudeAdapter: model={model}, workspace={self.workspace}, "
             f"permission_mode={permission_mode}"
         )
+
+    def _build_mcp_servers(self) -> dict | None:
+        """Build MCP server dict from .mcp_proxy_config.json for direct stdio connections.
+
+        Returns None when MCP is disabled, config file is absent, or all servers are filtered.
+        """
+        if not self.mcp_proxy_config or not self.mcp_proxy_config.enabled:
+            return None
+
+        config_file = _resolve_mcp_proxy_config_file()
+        if not config_file:
+            logger.warning("ClaudeAdapter: mcp_proxy.enabled=True but no .mcp_proxy_config.json found")
+            return None
+
+        try:
+            data = _json.loads(config_file.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning(f"ClaudeAdapter: failed to read MCP config: {e}")
+            return None
+
+        servers: dict = {}
+        allowlist = set(self.mcp_proxy_config.servers_allowlist)
+        blocklist = set(self.mcp_proxy_config.servers_blocklist)
+
+        for name, cfg in data.get("mcpServers", {}).items():
+            if cfg.get("disabled", False):
+                continue
+            if cfg.get("type", "stdio") != "stdio":
+                continue
+            if blocklist and name in blocklist:
+                continue
+            if allowlist and name not in allowlist:
+                continue
+            servers[name] = {
+                "type": "stdio",
+                "command": cfg["command"],
+                "args": cfg.get("args", []),
+                "env": cfg.get("env", {}),
+            }
+            if len(servers) >= self.mcp_proxy_config.servers_max:
+                break
+
+        return servers or None
 
     def _build_options(self, channel: str, chat_id: str) -> ClaudeAgentOptions:
         """Build ClaudeAgentOptions for a given session."""
@@ -179,6 +256,8 @@ class ClaudeAdapter(BaseAdapter):
         else:
             system_prompt_opt = {"type": "preset", "preset": "claude_code"}
 
+        mcp_servers = self._build_mcp_servers() or {}
+
         return ClaudeAgentOptions(
             cli_path=self.claude_path,
             model=self.model,
@@ -188,6 +267,7 @@ class ClaudeAdapter(BaseAdapter):
             max_turns=self.max_turns if self.max_turns > 0 else None,
             resume=session_id,
             env={"NODE_TLS_REJECT_UNAUTHORIZED": "0", "CLAUDECODE": ""},
+            mcp_servers=mcp_servers,
         )
 
     async def _run(

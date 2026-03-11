@@ -28,6 +28,7 @@ from importlib.metadata import version as pkg_version
 from pathlib import Path
 
 import typer
+from loguru import logger
 from rich.console import Console
 from rich.table import Table
 
@@ -651,15 +652,31 @@ def gateway_start(
     _backend = config.driver.backend
 
     # 检查并启动 MCP 代理
-    # 优先级：命令行参数 > 配置文件
+    # 优先级：命令行参数 > 统一配置 > iflow 专属配置
+    _unified_mcp = config.mcp_proxy.enabled
+    _iflow_mcp_enabled = bool(config.driver.iflow and config.driver.iflow.mcp_proxy_enabled)
+    _iflow_mcp_auto = bool(config.driver.iflow and config.driver.iflow.mcp_proxy_auto_start)
+
+    # Conflict warning: both unified and iflow-specific configs are set
+    if _unified_mcp and _iflow_mcp_enabled:
+        logger.warning(
+            "Both mcp_proxy (unified) and driver.iflow.mcp_proxy_enabled are set; "
+            "unified config takes precedence. Remove driver.iflow.mcp_proxy_enabled to silence this warning."
+        )
+
     should_start_mcp = (
         with_mcp
         if with_mcp is not None
-        else (config.driver.iflow.mcp_proxy_auto_start if config.driver.iflow else False)
+        else (_unified_mcp or (_iflow_mcp_enabled and _iflow_mcp_auto))
+    )
+    mcp_port = (
+        config.mcp_proxy.port if _unified_mcp
+        else (config.driver.iflow.mcp_proxy_port if config.driver.iflow else 8888)
     )
 
-    if _backend != "claude" and should_start_mcp and config.driver.iflow and config.driver.iflow.mcp_proxy_enabled:
-        mcp_port = config.driver.iflow.mcp_proxy_port
+    if _backend == "claude" and should_start_mcp:
+        logger.info("Claude backend: MCP servers will be passed directly via --mcp-config (no HTTP proxy)")
+    elif _backend != "claude" and should_start_mcp:
         if not check_mcp_proxy_running(mcp_port):
             console.print(f"[cyan]正在启动 MCP 代理 (端口: {mcp_port})...[/cyan]")
             if start_mcp_proxy(mcp_port):
@@ -669,6 +686,17 @@ def gateway_start(
         else:
             console.print(f"[green]{_OK_MARK}[/green] MCP 代理已在运行 (端口: {mcp_port})")
         console.print()
+
+    # Startup audit log
+    _mcp_enabled = _unified_mcp or _iflow_mcp_enabled
+    logger.bind(
+        event="gateway_startup",
+        backend=config.driver.backend,
+        transport=config.driver.transport,
+        mcp_enabled=_mcp_enabled,
+    ).info(
+        f"Gateway started: backend={config.driver.backend} transport={config.driver.transport}"
+    )
 
     # 检查后端是否就绪（根据 backend 分发到对应的检查器）
     _ready, _ready_msg = asyncio.run(check_backend_ready(_backend, config.driver))
@@ -737,6 +765,30 @@ def gateway_run(
 
     config = load_config()
     _backend = config.driver.backend
+
+    # Unified MCP config check (mirrors gateway_start logic)
+    _unified_mcp = config.mcp_proxy.enabled
+    _iflow_mcp_enabled = bool(config.driver.iflow and config.driver.iflow.mcp_proxy_enabled)
+
+    if _unified_mcp and _iflow_mcp_enabled:
+        logger.warning(
+            "Both mcp_proxy (unified) and driver.iflow.mcp_proxy_enabled are set; "
+            "unified config takes precedence. Remove driver.iflow.mcp_proxy_enabled to silence this warning."
+        )
+
+    if _backend == "claude" and (_unified_mcp or _iflow_mcp_enabled):
+        logger.info("Claude backend: MCP servers will be passed directly via --mcp-config (no HTTP proxy)")
+
+    # Startup audit log
+    _mcp_enabled = _unified_mcp or _iflow_mcp_enabled
+    logger.bind(
+        event="gateway_startup",
+        backend=config.driver.backend,
+        transport=config.driver.transport,
+        mcp_enabled=_mcp_enabled,
+    ).info(
+        f"Gateway started: backend={config.driver.backend} transport={config.driver.transport}"
+    )
 
     # 检查后端是否就绪（根据 backend 分发到对应的检查器）
     _ready, _ready_msg = asyncio.run(check_backend_ready(_backend, config.driver))
@@ -817,8 +869,6 @@ async def _start_acp_server(port: int = 8090) -> asyncio.subprocess.Process | No
     """
     import socket
 
-    from loguru import logger
-
     # 检查端口是否已被占用
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     result = sock.connect_ex(("localhost", port))
@@ -881,8 +931,6 @@ def _run_gateway_cmd():
 
 async def _run_gateway(config, verbose: bool = False) -> None:
     """运行网关服务。"""
-    from loguru import logger
-
     if verbose:
         logger.remove()
         logger.add(
@@ -954,6 +1002,7 @@ async def _run_gateway(config, verbose: bool = False) -> None:
             system_prompt=claude_cfg.system_prompt,
             max_turns=config.driver.max_turns,
             timeout=config.get_timeout(),
+            mcp_proxy_config=config.mcp_proxy,
         )
     else:
         iflow_cfg = config.driver.iflow
@@ -980,6 +1029,7 @@ async def _run_gateway(config, verbose: bool = False) -> None:
         adapter=adapter,
         model=config.get_model(),
         channel_manager=channel_manager,
+        backend_name=config.driver.backend,
     )
 
     # 创建 Cron 服务
@@ -1369,11 +1419,25 @@ def _run_iflow_cmd(cmd: list[str], cwd: Path | None = None) -> int:
     return result.returncode
 
 
+def _warn_passthrough_deprecated(cmd: str) -> None:
+    """Emit deprecation warning for a passthrough command (log + console)."""
+    msg = (
+        f"The 'cli-bridge {cmd}' passthrough command is deprecated and will be "
+        f"removed in v1.0.0. Use '{cmd}' directly instead."
+    )
+    logger.warning(msg)
+    console.print(
+        f"[yellow]⚠ Deprecated: 'cli-bridge {cmd}' will be removed in v1.0.0. "
+        f"Use '{cmd}' directly instead.[/yellow]"
+    )
+
+
 @app.command(name="iflow")
 def iflow_passthrough(
     args: list[str] = typer.Argument(None, help="iflow 命令参数"),
 ) -> None:
-    """透传命令到 iflow CLI。"""
+    """[DEPRECATED v1.0.0] 透传命令到 iflow CLI。Use 'iflow' directly instead."""
+    _warn_passthrough_deprecated("iflow")
     config = load_config()
     workspace = config.get_workspace()
 
@@ -1391,7 +1455,8 @@ def iflow_passthrough(
 
 @app.command(name="mcp")
 def mcp_passthrough(args: list[str] = typer.Argument(None)) -> None:
-    """透传到 iflow mcp 命令。"""
+    """[DEPRECATED v1.0.0] 透传到 iflow mcp 命令。Use 'mcp' directly instead."""
+    _warn_passthrough_deprecated("mcp")
     cmd = ["iflow", "mcp"] + (args or [])
     returncode = _run_iflow_cmd(cmd)
     raise typer.Exit(returncode)
@@ -1399,7 +1464,8 @@ def mcp_passthrough(args: list[str] = typer.Argument(None)) -> None:
 
 @app.command(name="agent")
 def agent_passthrough(args: list[str] = typer.Argument(None)) -> None:
-    """透传到 iflow agent 命令。"""
+    """[DEPRECATED v1.0.0] 透传到 iflow agent 命令。Use 'agent' directly instead."""
+    _warn_passthrough_deprecated("agent")
     cmd = ["iflow", "agent"] + (args or [])
     returncode = _run_iflow_cmd(cmd)
     raise typer.Exit(returncode)
@@ -1407,7 +1473,8 @@ def agent_passthrough(args: list[str] = typer.Argument(None)) -> None:
 
 @app.command(name="workflow")
 def workflow_passthrough(args: list[str] = typer.Argument(None)) -> None:
-    """透传到 iflow workflow 命令。"""
+    """[DEPRECATED v1.0.0] 透传到 iflow workflow 命令。Use 'workflow' directly instead."""
+    _warn_passthrough_deprecated("workflow")
     cmd = ["iflow", "workflow"] + (args or [])
     returncode = _run_iflow_cmd(cmd)
     raise typer.Exit(returncode)
@@ -1415,7 +1482,8 @@ def workflow_passthrough(args: list[str] = typer.Argument(None)) -> None:
 
 @app.command(name="skill")
 def skill_passthrough(args: list[str] = typer.Argument(None)) -> None:
-    """透传到 iflow skill 命令。"""
+    """[DEPRECATED v1.0.0] 透传到 iflow skill 命令。Use 'skill' directly instead."""
+    _warn_passthrough_deprecated("skill")
     cmd = ["iflow", "skill"] + (args or [])
     returncode = _run_iflow_cmd(cmd)
     raise typer.Exit(returncode)
@@ -1423,7 +1491,8 @@ def skill_passthrough(args: list[str] = typer.Argument(None)) -> None:
 
 @app.command(name="commands")
 def commands_passthrough(args: list[str] = typer.Argument(None)) -> None:
-    """透传到 iflow commands 命令。"""
+    """[DEPRECATED v1.0.0] 透传到 iflow commands 命令。Use 'commands' directly instead."""
+    _warn_passthrough_deprecated("commands")
     cmd = ["iflow", "commands"] + (args or [])
     returncode = _run_iflow_cmd(cmd)
     raise typer.Exit(returncode)

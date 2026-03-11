@@ -13,7 +13,7 @@ from cli_bridge.utils.platform import run_command
 console = Console()
 
 _DEPRECATION_MSG = (
-    "The 'iflow' passthrough command is deprecated and will be removed in a future version. "
+    "The 'iflow' passthrough command is deprecated and will be removed in v1.0.0. "
     "Use iflow directly instead."
 )
 
