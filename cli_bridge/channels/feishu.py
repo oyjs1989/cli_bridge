@@ -326,6 +326,7 @@ class FeishuChannel(BaseChannel):
         self.config: FeishuConfig = config
         self._client: Any = None
         self._ws_client: Any = None
+        self._ws_loop: Optional[asyncio.AbstractEventLoop] = None
         self._ws_thread: Optional[threading.Thread] = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -409,6 +410,7 @@ class FeishuChannel(BaseChannel):
                     new_loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(new_loop)
                     ws_client_module.loop = new_loop
+                    self._ws_loop = new_loop
 
                     # 现在可以安全地调用 start()
                     self._ws_client.start()
@@ -430,9 +432,11 @@ class FeishuChannel(BaseChannel):
     async def stop(self) -> None:
         """Stop the Feishu bot."""
         self._running = False
-        if self._ws_client:
+        if self._ws_client and self._ws_loop and self._ws_loop.is_running():
             try:
-                self._ws_client.stop()
+                asyncio.run_coroutine_threadsafe(
+                    self._ws_client._disconnect(), self._ws_loop
+                ).result(timeout=5)
             except Exception as e:
                 logger.warning(f"Error stopping WebSocket client: {e}")
         logger.info("Feishu bot stopped")
