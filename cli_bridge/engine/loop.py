@@ -60,6 +60,7 @@ class AgentLoop:
         model: str = "kimi-k2.5",
         streaming: bool = True,
         channel_manager: ChannelManager | None = None,
+        backend_name: str = "",
     ):
         self.bus = bus
         self.adapter = adapter
@@ -77,6 +78,9 @@ class AgentLoop:
 
         # P3: 每用户并发锁，确保同一用户的消息串行处理，避免会话状态混乱
         self._user_locks: dict[str, asyncio.Lock] = {}
+
+        # Structured logger bound with backend name for consistent audit fields
+        self._log = logger.bind(backend=backend_name) if backend_name else logger
 
         logger.info(
             f"AgentLoop initialized with model={model}, workspace={self.workspace}, streaming={streaming}"
@@ -239,8 +243,8 @@ time: {now}
         lock = self._get_user_lock(msg.channel, msg.chat_id)
         async with lock:
             try:
-                logger.info(f"Processing: {msg.channel}:{msg.chat_id}")
-                logger.info(
+                self._log.info(f"Processing: {msg.channel}:{msg.chat_id}")
+                self._log.info(
                     "Inbound detail: channel={} chat_id={} sender={} msg_type={}",
                     msg.channel,
                     msg.chat_id,
@@ -318,10 +322,10 @@ time: {now}
                         metadata={"reply_to_id": msg.metadata.get("message_id")},
                     )
                     await self.bus.publish_outbound(outbound)
-                    logger.info(f"Response sent to {msg.channel}:{msg.chat_id}")
+                    self._log.info(f"Response sent to {msg.channel}:{msg.chat_id}")
 
             except Exception as e:
-                logger.exception(f"Error processing message for {msg.channel}:{msg.chat_id}")  # B6
+                self._log.exception(f"Error processing message for {msg.channel}:{msg.chat_id}")  # B6
                 await self.bus.publish_outbound(
                     OutboundMessage(
                         channel=msg.channel,

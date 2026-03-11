@@ -806,6 +806,28 @@ class ConsoleService:
             updated_at = ""
             if session_file.exists():
                 updated_at = datetime.fromtimestamp(session_file.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                # Fallback: use ChannelRecorder files (works for Claude backend)
+                channel_path = self.channel_dir / channel
+                if channel_path.exists():
+                    recorder_files = sorted(
+                        channel_path.glob(f"{chat_id}-*.json"),
+                        key=lambda p: p.stat().st_mtime,
+                        reverse=True,
+                    )
+                    if recorder_files:
+                        most_recent = recorder_files[0]
+                        updated_at = datetime.fromtimestamp(
+                            most_recent.stat().st_mtime
+                        ).strftime("%Y-%m-%d %H:%M:%S")
+                        if not preview:
+                            try:
+                                data = json.loads(most_recent.read_text(encoding="utf-8"))
+                                recorder_msgs = data.get("messages", [])
+                                if recorder_msgs:
+                                    preview = str(recorder_msgs[-1].get("content", "")).replace("\n", " ").strip()
+                            except Exception:
+                                pass
             target_meta = meta.get(key, {})
             pinned = bool(target_meta.get("pinned", False))
             pinned_at = str(target_meta.get("pinned_at", ""))
