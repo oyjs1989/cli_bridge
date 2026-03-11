@@ -91,8 +91,8 @@ class AgentLoop:
             - 否则如果 AGENTS.md 存在，返回 (AGENTS内容, False)
             - 都不存在，返回 (None, False)
         """
-        # stdio/acp/claude 模式下，AGENTS 通过 session system_prompt 注入，避免每条消息重复注入
-        inline_agents = getattr(self.adapter, "mode", "cli") not in {"stdio", "acp", "claude"}
+        # long-lived adapters inject AGENTS via session system_prompt; cli adapters need inline injection
+        inline_agents = getattr(self.adapter, "inline_agents", True)
 
         # 优先检查 BOOTSTRAP.md
         bootstrap_file = self.workspace / "BOOTSTRAP.md"
@@ -252,22 +252,7 @@ time: {now}
                 if msg.content.strip().lower() in ["/new", "/start"]:
                     cleared = False
                     try:
-                        mode = getattr(self.adapter, "mode", "cli")
-                        if mode == "claude":
-                            # ClaudeAdapter.clear_session() is called directly (no inner adapter)
-                            cleared = self.adapter.clear_session(msg.channel, msg.chat_id)
-                        elif mode in {"stdio", "acp"}:
-                            # IFlowAdapter wraps inner adapter — must clear at the inner layer
-                            if mode == "stdio":
-                                stdio_adapter = await self.adapter._get_stdio_adapter()
-                                cleared = stdio_adapter.clear_session(msg.channel, msg.chat_id)
-                            else:
-                                acp_adapter = await self.adapter._get_acp_adapter()
-                                cleared = acp_adapter.clear_session(msg.channel, msg.chat_id)
-                        else:
-                            cleared = self.adapter.session_mappings.clear_session(
-                                msg.channel, msg.chat_id
-                            )
+                        cleared = self.adapter.clear_session(msg.channel, msg.chat_id)
                     except Exception as e:
                         logger.warning(
                             f"Failed to clear session for {msg.channel}:{msg.chat_id}: {e}"

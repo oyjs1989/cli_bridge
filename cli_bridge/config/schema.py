@@ -1,12 +1,9 @@
-"""配置 schema for cli-bridge。
-
-参考: https://platform.iflow.cn/cli/configuration/settings
-"""
+"""配置 schema for cli-bridge。"""
 
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -185,78 +182,137 @@ class ChannelsConfig(BaseModel):
 
 
 # ============================================================================
-# Driver 配置（iflow 设置）
+# Driver 配置（后端设置）
 # ============================================================================
 
 
-class DriverConfig(BaseModel):
-    """IFlow driver 配置。
+class IFlowBackendConfig(BaseModel):
+    """iflow 后端专属配置。
 
-    参考: https://platform.iflow.cn/cli/configuration/settings
+    仅在 driver.backend == "iflow" 时使用。
     """
 
     model_config = {"extra": "ignore"}
 
-    mode: Literal["cli", "acp", "stdio", "claude"] = "stdio"
-    """通信模式: cli (子进程调用), acp (WebSocket), stdio (直接通过 stdin/stdout), 或 claude (Anthropic API)"""
-
     iflow_path: str = "iflow"
+    """iflow 二进制路径。"""
+
     model: str = "minimax-m2.5"
+    """默认模型名称。"""
+
     yolo: bool = True
+    """自动审批模式（跳过所有确认提示）。"""
+
     thinking: bool = False
-    max_turns: int = 40
-    timeout: int = Field(default_factory=_get_default_timeout)
-    compression_trigger_tokens: int = 60000
-    """活跃会话自动压缩触发阈值（估算 token）"""
-    workspace: str = ""  # 关键：iflow 工作目录
+    """启用扩展思考模式。"""
+
     extra_args: list[str] = Field(default_factory=list)
+    """传递给 iflow CLI 的额外参数。"""
+
+    compression_trigger_tokens: int = 60000
+    """活跃会话自动压缩触发阈值（估算 token）。"""
 
     # ACP 模式配置
-    acp_port: int = 8090
-    """ACP 模式下的端口号"""
-
     acp_host: str = "localhost"
-    """ACP 模式下的主机地址"""
+    """ACP 模式下的主机地址。"""
 
-    disable_mcp: bool = False
-    """是否禁用 MCP 服务器（减少资源消耗）"""
+    acp_port: int = 8090
+    """ACP 模式下的端口号。"""
 
     # MCP 代理配置
+    disable_mcp: bool = False
+    """是否禁用 MCP 服务器（减少资源消耗）。"""
+
     mcp_proxy_enabled: bool = True
-    """是否启用 MCP 代理（共享 MCP 服务器以减少资源消耗）"""
+    """是否启用 MCP 代理（共享 MCP 服务器以减少资源消耗）。"""
 
     mcp_proxy_port: int = 8888
-    """MCP 代理服务器的端口号"""
+    """MCP 代理服务器的端口号。"""
 
     mcp_proxy_auto_start: bool = True
-    """是否在启动网关时自动启动 MCP 代理"""
+    """是否在启动网关时自动启动 MCP 代理。"""
 
     mcp_servers_auto_discover: bool = True
-    """是否自动从 MCP 代理发现启用的服务器（替代硬编码）"""
+    """是否自动从 MCP 代理发现启用的服务器。"""
 
     mcp_servers_max: int = 10
-    """单个 iflow 实例最多连接的 MCP 服务器数量（防止资源耗尽）"""
+    """单个 iflow 实例最多连接的 MCP 服务器数量。"""
 
     mcp_servers_allowlist: list[str] = Field(default_factory=list)
-    """允许使用的 MCP 服务器名称列表（空表示使用代理中的所有服务器）"""
+    """允许使用的 MCP 服务器名称列表（空表示使用所有）。"""
 
     mcp_servers_blocklist: list[str] = Field(default_factory=list)
-    """禁用的 MCP 服务器名称列表（优先级高于 allowlist）"""
+    """禁用的 MCP 服务器名称列表（优先级高于 allowlist）。"""
 
-    # ── Claude CLI adapter ───────────────────────────────────────────────────
+
+class ClaudeBackendConfig(BaseModel):
+    """Claude Code 后端专属配置。
+
+    仅在 driver.backend == "claude" 时使用。
+    """
+
+    model_config = {"extra": "ignore"}
+
     claude_path: str = "claude"
-    """Path to the claude CLI binary."""
+    """claude CLI 二进制路径。"""
 
-    claude_model: str = "claude-opus-4-6"
-    """Model ID passed via --model (e.g. claude-opus-4-6, sonnet, opus)."""
+    model: str = "claude-opus-4-6"
+    """通过 --model 传递的模型 ID。"""
 
-    claude_system_prompt: str = ""
-    """Static system prompt appended to Claude's default. Empty = use Claude default."""
+    system_prompt: str = ""
+    """追加到 Claude 默认系统提示词的静态内容。空字符串表示使用 Claude 默认值。"""
 
-    claude_permission_mode: Literal["default", "acceptEdits", "bypassPermissions"] = (
+    permission_mode: Literal["default", "acceptEdits", "bypassPermissions"] = (
         "bypassPermissions"
     )
-    """Permission mode for Claude tool execution. bypassPermissions = skip all prompts."""
+    """Claude 工具执行权限模式。bypassPermissions = 跳过所有确认提示。"""
+
+
+class DriverConfig(BaseModel):
+    """后端驱动配置（共享字段 + 后端专属嵌套对象）。"""
+
+    model_config = {"extra": "ignore"}
+
+    backend: Literal["iflow", "claude"] = "iflow"
+    """AI 后端: iflow 或 claude。"""
+
+    transport: Literal["cli", "stdio", "acp"] = "stdio"
+    """通信方式: cli (子进程), stdio (长运行进程), acp (WebSocket)。"""
+
+    max_turns: int = 40
+    """最大对话轮数（所有后端共用）。"""
+
+    timeout: int = Field(default_factory=_get_default_timeout)
+    """请求超时时间（秒，所有后端共用）。"""
+
+    workspace: str = ""
+    """工作目录路径（所有后端共用）。空字符串使用默认路径 ~/.cli-bridge/workspace。"""
+
+    # 后端专属嵌套配置
+    iflow: IFlowBackendConfig | None = None
+    """iflow 专属配置。backend == "iflow" 时自动填充默认值。"""
+
+    claude: ClaudeBackendConfig | None = None
+    """Claude Code 专属配置。backend == "claude" 时自动填充默认值。"""
+
+    @model_validator(mode="after")
+    def validate_combination(self) -> "DriverConfig":
+        """拒绝不支持的 backend + transport 组合。"""
+        if self.backend == "claude" and self.transport == "acp":
+            raise ValueError(
+                "backend='claude' + transport='acp' is not yet supported. "
+                "Use transport='cli' or transport='stdio' with the claude backend."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def populate_backend_config(self) -> "DriverConfig":
+        """根据 backend 自动填充对应的后端配置（如未显式提供）。"""
+        if self.backend == "iflow" and self.iflow is None:
+            self.iflow = IFlowBackendConfig()
+        elif self.backend == "claude" and self.claude is None:
+            self.claude = ClaudeBackendConfig()
+        return self
 
 
 # ============================================================================
@@ -317,11 +373,13 @@ class Config(BaseSettings):
     def get_model(self) -> str:
         """获取模型名称。
 
-        优先使用 driver.model，默认为 glm-5
+        根据 driver.backend 从对应的后端配置中读取模型名称。
         """
-        if self.driver and self.driver.model:
-            return self.driver.model
-        return "glm-5"
+        if self.driver.backend == "iflow" and self.driver.iflow:
+            return self.driver.iflow.model
+        elif self.driver.backend == "claude" and self.driver.claude:
+            return self.driver.claude.model
+        return "minimax-m2.5"
 
     def get_timeout(self) -> int:
         """获取超时时间。"""

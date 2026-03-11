@@ -15,13 +15,15 @@ import hashlib
 import json
 import platform
 import re
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Literal
 
 from loguru import logger
 
 from cli_bridge.config.loader import DEFAULT_TIMEOUT
+from cli_bridge.engine.base_adapter import BaseAdapter
 
 
 def _is_windows() -> bool:
@@ -54,7 +56,7 @@ class SessionMappingManager:
     }
     """
 
-    def __init__(self, mapping_file: Optional[Path] = None):
+    def __init__(self, mapping_file: Path | None = None):
         self.mapping_file = mapping_file or Path.home() / ".cli-bridge" / "session_mappings.json"
         self.mapping_file.parent.mkdir(parents=True, exist_ok=True)
         self._mappings: dict[str, str] = {}
@@ -63,7 +65,7 @@ class SessionMappingManager:
     def _load(self) -> None:
         if self.mapping_file.exists():
             try:
-                with open(self.mapping_file, "r", encoding="utf-8") as f:
+                with open(self.mapping_file, encoding="utf-8") as f:
                     self._mappings = json.load(f)
                 logger.debug(f"Loaded {len(self._mappings)} session mappings")
             except json.JSONDecodeError:
@@ -74,7 +76,7 @@ class SessionMappingManager:
         with open(self.mapping_file, "w", encoding="utf-8") as f:
             json.dump(self._mappings, f, indent=2, ensure_ascii=False)
 
-    def get_session_id(self, channel: str, chat_id: str) -> Optional[str]:
+    def get_session_id(self, channel: str, chat_id: str) -> str | None:
         key = f"{channel}:{chat_id}"
         return self._mappings.get(key)
 
@@ -96,14 +98,14 @@ class SessionMappingManager:
         return self._mappings.copy()
 
 
-class IFlowAdapter:
+class IFlowAdapter(BaseAdapter):
     """IFlow CLI 适配器 - 支持三种通信模式。
-    
+
     模式：
     - cli: 通过子进程调用 iflow 命令（默认）
     - acp: 通过 WebSocket 连接 iflow ACP 服务
     - stdio: 通过 stdio 直接与 iflow --experimental-acp 通信
-    
+
     所有用户共享同一个 workspace，通过会话 ID 映射区分不同用户。
     """
 
@@ -112,23 +114,23 @@ class IFlowAdapter:
         default_model: str = "glm-5",
         timeout: int = DEFAULT_TIMEOUT,
         iflow_path: str = "iflow",
-        workspace: Optional[Path] = None,
+        workspace: Path | None = None,
         thinking: bool = False,
-        mode: Literal["cli", "acp", "stdio"] = "cli",
+        transport: Literal["cli", "acp", "stdio"] = "cli",
         acp_host: str = "localhost",
         acp_port: int = 8090,
         compression_trigger_tokens: int = 60000,
         mcp_proxy_port: int = 8888,
         mcp_servers_auto_discover: bool = True,
         mcp_servers_max: int = 10,
-        mcp_servers_allowlist: Optional[list[str]] = None,
-        mcp_servers_blocklist: Optional[list[str]] = None,
+        mcp_servers_allowlist: list[str] | None = None,
+        mcp_servers_blocklist: list[str] | None = None,
     ):
         self.default_model = default_model
         self.thinking = thinking
         self.timeout = timeout
         self.iflow_path = iflow_path
-        self.mode = mode
+        self._transport = transport
         self.acp_host = acp_host
         self.acp_port = acp_port
         self.compression_trigger_tokens = max(0, int(compression_trigger_tokens))
@@ -137,7 +139,7 @@ class IFlowAdapter:
         self.mcp_servers_max = mcp_servers_max
         self.mcp_servers_allowlist = mcp_servers_allowlist or []
         self.mcp_servers_blocklist = mcp_servers_blocklist or []
-        
+
         # workspace 是 iflow 执行的工作目录
         if workspace:
             ws = str(workspace)
@@ -146,19 +148,37 @@ class IFlowAdapter:
             self.workspace = Path(ws).resolve()
         else:
             self.workspace = Path.home() / ".cli-bridge" / "workspace"
-        
+
         self.workspace.mkdir(parents=True, exist_ok=True)
-        
+
         self.session_mappings = SessionMappingManager()
         self._running_processes: dict[str, asyncio.subprocess.Process] = {}
-        
+
         # ACP 模式适配器（懒加载）
-        self._acp_adapter: Optional["ACPAdapter"] = None
+        self._acp_adapter: ACPAdapter | None = None
         # Stdio ACP 模式适配器（懒加载）
-        self._stdio_adapter: Optional["StdioACPAdapter"] = None
-        
-        logger.info(f"IFlowAdapter: mode={mode}, workspace={self.workspace}, model={default_model}, thinking={thinking}")
-    
+        self._stdio_adapter: StdioACPAdapter | None = None
+
+        logger.info(f"IFlowAdapter: transport={self._transport}, workspace={self.workspace}, model={default_model}, thinking={thinking}")
+
+    @property
+    def transport(self) -> str:
+        """Transport identifier ('cli', 'stdio', 'acp')."""
+        return self._transport
+
+    @property
+    def inline_agents(self) -> bool:
+        return self._transport == "cli"
+
+    def clear_session(self, channel: str, chat_id: str) -> bool:
+        """清除指定渠道+聊天ID的会话映射。Returns True if a session existed."""
+        if self._transport == "acp" and self._acp_adapter:
+            return self._acp_adapter.clear_session(channel, chat_id)
+        elif self._transport == "stdio" and self._stdio_adapter:
+            return self._stdio_adapter.clear_session(channel, chat_id)
+        else:
+            return self.session_mappings.clear_session(channel, chat_id)
+
     @property
     def project_hash(self) -> str:
         return hashlib.sha256(str(self.workspace.resolve()).encode()).hexdigest()[:64]
@@ -166,8 +186,8 @@ class IFlowAdapter:
     @property
     def iflow_sessions_dir(self) -> Path:
         return Path.home() / ".iflow" / "projects" / f"-{self.project_hash}"
-    
-    async def _get_acp_adapter(self) -> "ACPAdapter":
+
+    async def _get_acp_adapter(self) -> ACPAdapter:
         """获取或创建 ACP 适配器。"""
         if self._acp_adapter is None:
             from cli_bridge.engine.acp import ACPAdapter
@@ -183,7 +203,7 @@ class IFlowAdapter:
             logger.info(f"ACP adapter connected: {self.acp_host}:{self.acp_port}")
         return self._acp_adapter
 
-    async def _get_stdio_adapter(self) -> "StdioACPAdapter":
+    async def _get_stdio_adapter(self) -> StdioACPAdapter:
         """获取或创建 Stdio ACP 适配器。"""
         if self._stdio_adapter is None:
             from cli_bridge.engine.stdio_acp import StdioACPAdapter
@@ -201,24 +221,24 @@ class IFlowAdapter:
                 mcp_servers_blocklist=self.mcp_servers_blocklist,
             )
             await self._stdio_adapter.connect()
-            logger.info(f"StdioACP adapter connected")
+            logger.info("StdioACP adapter connected")
         return self._stdio_adapter
 
     def list_iflow_sessions(self) -> list[dict]:
         sessions_dir = self.iflow_sessions_dir
         if not sessions_dir.exists():
             return []
-        
+
         sessions = []
         for session_file in sessions_dir.glob("session-*.jsonl"):
             try:
                 stat = session_file.stat()
                 session_id = session_file.stem
-                
-                with open(session_file, "r", encoding="utf-8") as f:
+
+                with open(session_file, encoding="utf-8") as f:
                     lines = f.readlines()
                     message_count = len([l for l in lines if l.strip()])
-                
+
                 first_msg = None
                 last_msg = None
                 if lines:
@@ -229,7 +249,7 @@ class IFlowAdapter:
                         last_msg = last.get("timestamp")
                     except (json.JSONDecodeError, IndexError, KeyError):
                         pass
-                
+
                 sessions.append({
                     "id": session_id,
                     "file": str(session_file),
@@ -239,7 +259,7 @@ class IFlowAdapter:
                 })
             except Exception as e:
                 logger.debug(f"Error reading session {session_file}: {e}")
-        
+
         sessions.sort(key=lambda x: x["updated_at"], reverse=True)
         return sessions
 
@@ -247,14 +267,14 @@ class IFlowAdapter:
         """过滤 iflow 输出中的进度信息。"""
         if not output:
             return ""
-        
+
         lines = output.split("\n")
         filtered_lines = []
         in_execution_info = False
-        
+
         for line in lines:
             stripped = line.strip()
-            
+
             if stripped.startswith("<Execution Info>") or stripped.startswith("〈Execution Info〉"):
                 in_execution_info = True
                 continue
@@ -263,7 +283,7 @@ class IFlowAdapter:
                 continue
             if in_execution_info:
                 continue
-            
+
             # 跳过进度和思考消息
             if stripped in ["Thinking...", "正在思考...", "Processing..."]:
                 continue
@@ -271,14 +291,13 @@ class IFlowAdapter:
                 continue
             if stripped.startswith("ℹ️") and "Resuming session" in stripped:
                 continue
-            
+
             filtered_lines.append(line)
-        
+
         return "\n".join(filtered_lines).strip()
 
-    def _extract_session_id_from_output(self, output: str) -> Optional[str]:
+    def _extract_session_id_from_output(self, output: str) -> str | None:
         """从 iflow 输出中提取会话 ID。"""
-        import re
         match = re.search(r'"session-id"\s*:\s*"(session-[^"]+)"', output)
         if match:
             return match.group(1)
@@ -287,42 +306,42 @@ class IFlowAdapter:
     async def _build_command(
         self,
         message: str,
-        model: Optional[str] = None,
-        session_id: Optional[str] = None,
+        model: str | None = None,
+        session_id: str | None = None,
         continue_session: bool = False,
         yolo: bool = True,
         thinking: bool = False,
     ) -> list[str]:
         """构建 iflow 命令。"""
         cmd = [self.iflow_path]
-        
+
         if model:
             cmd.extend(["-m", model])
-        
+
         if session_id:
             cmd.extend(["-r", session_id])
         elif continue_session:
             cmd.append("-c")
-        
+
         if yolo:
             cmd.append("-y")
-        
+
         if thinking:
             cmd.append("--thinking")
-        
+
         cmd.extend(["-p", message])
         return cmd
 
     async def _run_process(
         self,
         cmd: list[str],
-        timeout: Optional[int] = None,
+        timeout: int | None = None,
     ) -> tuple[str, str]:
         """运行 iflow 子进程。"""
         timeout = timeout or self.timeout
-        
+
         logger.debug(f"Running: {' '.join(cmd)} in {self.workspace}")
-        
+
         if _is_windows():
             # Windows 上使用 shell 启动命令，确保 .CMD 文件能被正确执行
             cmd_str = " ".join(f'"{c}"' if " " in c else c for c in cmd)
@@ -340,9 +359,9 @@ class IFlowAdapter:
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.workspace),
             )
-        
+
         self._running_processes[str(id(process))] = process
-        
+
         stdout_lines: list[str] = []
         stderr_lines: list[str] = []
 
@@ -368,7 +387,7 @@ class IFlowAdapter:
             raise IFlowTimeoutError(f"Timeout after {timeout}s")
 
         await process.wait()
-        
+
         return "\n".join(stdout_lines), "\n".join(stderr_lines)
 
     async def chat(
@@ -376,8 +395,8 @@ class IFlowAdapter:
         message: str,
         channel: str = "cli",
         chat_id: str = "direct",
-        model: Optional[str] = None,
-        timeout: Optional[int] = None,
+        model: str | None = None,
+        timeout: int | None = None,
     ) -> str:
         """发送消息并获取响应。
         
@@ -386,26 +405,26 @@ class IFlowAdapter:
         - acp: 通过 WebSocket 连接 iflow ACP 服务
         - stdio: 通过 stdio 直接与 iflow --experimental-acp 通信
         """
-        if self.mode == "acp":
+        if self._transport == "acp":
             return await self._chat_acp(message, channel, chat_id, model, timeout)
-        elif self.mode == "stdio":
+        elif self._transport == "stdio":
             return await self._chat_stdio(message, channel, chat_id, model, timeout)
         else:
             return await self._chat_cli(message, channel, chat_id, model, timeout)
-    
+
     async def _chat_cli(
         self,
         message: str,
         channel: str = "cli",
         chat_id: str = "direct",
-        model: Optional[str] = None,
-        timeout: Optional[int] = None,
+        model: str | None = None,
+        timeout: int | None = None,
     ) -> str:
         """CLI 模式：通过子进程调用 iflow 命令。"""
         session_id = self.session_mappings.get_session_id(channel, chat_id)
-        
+
         logger.info(f"Chat (CLI): {channel}:{chat_id} (session={session_id or 'new'})")
-        
+
         cmd = await self._build_command(
             message=message,
             model=model or self.default_model,
@@ -413,34 +432,34 @@ class IFlowAdapter:
             continue_session=False,
             thinking=self.thinking,
         )
-        
+
         stdout, stderr = await self._run_process(cmd, timeout=timeout)
-        
+
         combined_output = stdout + "\n" + stderr
-        
+
         extracted_session_id = self._extract_session_id_from_output(combined_output)
-        
+
         if not session_id and extracted_session_id:
             self.session_mappings.set_session_id(channel, chat_id, extracted_session_id)
             logger.info(f"New session: {channel}:{chat_id} -> {extracted_session_id}")
-        
+
         response = self._filter_progress_output(stdout.strip())
-        
+
         return response
-    
+
     async def _chat_acp(
         self,
         message: str,
         channel: str = "cli",
         chat_id: str = "direct",
-        model: Optional[str] = None,
-        timeout: Optional[int] = None,
+        model: str | None = None,
+        timeout: int | None = None,
     ) -> str:
         """ACP 模式：通过 WebSocket 连接 iflow ACP 服务。"""
         adapter = await self._get_acp_adapter()
-        
+
         logger.info(f"Chat (ACP): {channel}:{chat_id}")
-        
+
         response = await adapter.chat(
             message=message,
             channel=channel,
@@ -448,7 +467,7 @@ class IFlowAdapter:
             model=model or self.default_model,
             timeout=timeout or self.timeout,
         )
-        
+
         return response
 
     async def _chat_stdio(
@@ -456,14 +475,14 @@ class IFlowAdapter:
         message: str,
         channel: str = "cli",
         chat_id: str = "direct",
-        model: Optional[str] = None,
-        timeout: Optional[int] = None,
+        model: str | None = None,
+        timeout: int | None = None,
     ) -> str:
         """Stdio 模式：通过 stdio 直接与 iflow --experimental-acp 通信。"""
         adapter = await self._get_stdio_adapter()
-        
+
         logger.info(f"Chat (Stdio): {channel}:{chat_id}")
-        
+
         response = await adapter.chat(
             message=message,
             channel=channel,
@@ -471,7 +490,7 @@ class IFlowAdapter:
             model=model or self.default_model,
             timeout=timeout or self.timeout,
         )
-        
+
         return response
 
     async def chat_stream(
@@ -479,11 +498,11 @@ class IFlowAdapter:
         message: str,
         channel: str = "cli",
         chat_id: str = "direct",
-        model: Optional[str] = None,
-        timeout: Optional[int] = None,
-        on_chunk: Optional[Callable] = None,
-        on_tool_call: Optional[Callable] = None,
-        on_event: Optional[Callable] = None,
+        model: str | None = None,
+        timeout: int | None = None,
+        on_chunk: Callable | None = None,
+        on_tool_call: Callable | None = None,
+        on_event: Callable | None = None,
     ) -> str:
         """
         发送消息并流式获取响应。
@@ -501,8 +520,8 @@ class IFlowAdapter:
         Returns:
             最终响应文本
         """
-        if self.mode == "acp" or self.mode == "stdio":
-            if self.mode == "acp":
+        if self._transport == "acp" or self._transport == "stdio":
+            if self._transport == "acp":
                 adapter = await self._get_acp_adapter()
                 from cli_bridge.engine.acp import AgentMessageChunk
                 logger.info(f"Chat Stream (ACP): {channel}:{chat_id}")
@@ -510,9 +529,9 @@ class IFlowAdapter:
                 adapter = await self._get_stdio_adapter()
                 from cli_bridge.engine.stdio_acp import AgentMessageChunk
                 logger.info(f"Chat Stream (Stdio): {channel}:{chat_id}")
-            
+
             chunk_count = 0
-            
+
             async def handle_chunk(chunk: AgentMessageChunk):
                 nonlocal chunk_count
                 if not chunk.is_thought and chunk.text and on_chunk:
@@ -527,7 +546,7 @@ class IFlowAdapter:
             async def handle_event(event: dict[str, Any]):
                 if on_event:
                     await on_event(event)
-            
+
             response = await adapter.chat_stream(
                 message=message,
                 channel=channel,
@@ -538,9 +557,9 @@ class IFlowAdapter:
                 on_tool_call=handle_tool_call,
                 on_event=handle_event,
             )
-            
+
             logger.info(f"Chat stream completed: {chunk_count} chunks sent")
-            
+
             return response
         else:
             return await self.chat(message, channel, chat_id, model, timeout)
@@ -550,11 +569,11 @@ class IFlowAdapter:
         message: str,
         channel: str = "cli",
         chat_id: str = "direct",
-        model: Optional[str] = None,
-        timeout: Optional[int] = None,
+        model: str | None = None,
+        timeout: int | None = None,
     ) -> str:
         """开始新对话。"""
-        if self.mode == "acp":
+        if self._transport == "acp":
             adapter = await self._get_acp_adapter()
             adapter.clear_session(channel, chat_id)
             logger.info(f"Cleared ACP session for {channel}:{chat_id}, starting fresh")
@@ -565,7 +584,7 @@ class IFlowAdapter:
                 model=model or self.default_model,
                 timeout=timeout or self.timeout,
             )
-        elif self.mode == "stdio":
+        elif self._transport == "stdio":
             adapter = await self._get_stdio_adapter()
             adapter.clear_session(channel, chat_id)
             logger.info(f"Cleared Stdio session for {channel}:{chat_id}, starting fresh")
@@ -584,7 +603,7 @@ class IFlowAdapter:
     async def run_iflow_command(
         self,
         args: list[str],
-        timeout: Optional[int] = None,
+        timeout: int | None = None,
     ) -> tuple[str, str]:
         """直接运行 iflow 命令。"""
         cmd = [self.iflow_path] + args
@@ -601,7 +620,7 @@ class IFlowAdapter:
                 except OSError:
                     pass
         self._running_processes.clear()
-        
+
         # 断开 ACP 连接
         if self._acp_adapter:
             try:
@@ -609,7 +628,7 @@ class IFlowAdapter:
             except Exception as e:
                 logger.warning(f"Failed to disconnect ACP adapter: {e}")
             self._acp_adapter = None
-        
+
         # 断开 Stdio ACP 连接
         if self._stdio_adapter:
             try:
@@ -620,11 +639,11 @@ class IFlowAdapter:
 
     async def health_check(self) -> bool:
         """检查 iflow 是否可用。"""
-        if self.mode == "acp":
+        if self._transport == "acp":
             if self._acp_adapter:
                 return await self._acp_adapter.health_check()
             return False
-        elif self.mode == "stdio":
+        elif self._transport == "stdio":
             if self._stdio_adapter:
                 return await self._stdio_adapter.health_check()
             return False

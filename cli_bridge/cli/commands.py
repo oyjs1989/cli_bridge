@@ -31,6 +31,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from cli_bridge.cli.health import check_backend_ready
 from cli_bridge.utils.platform import (
     is_windows,
     prepare_subprocess_command,
@@ -369,41 +370,42 @@ def save_config(config) -> None:
 # ============================================================================
 
 
-def init_workspace(workspace: Path) -> None:
+def init_workspace(workspace: Path, backend: str = "iflow") -> None:
     """初始化 workspace 目录，从模板目录复制文件。
 
     逻辑：
     - 如果 workspace 已存在 AGENTS.md 或 BOOT.md，说明已初始化，跳过模板复制
     - 只有全新的 workspace 才复制所有模板（包括 BOOTSTRAP.md）
+    - claude 后端不需要 .iflow/settings.json
     """
     # 展开波浪号路径
     workspace = Path(str(workspace).replace("~", str(Path.home())))
     workspace.mkdir(parents=True, exist_ok=True)
 
-    # 创建 .iflow 目录
-    iflow_dir = workspace / ".iflow"
-    iflow_dir.mkdir(exist_ok=True)
+    # 创建 .iflow 目录和 settings.json（仅 iflow 后端需要）
+    if backend == "iflow":
+        iflow_dir = workspace / ".iflow"
+        iflow_dir.mkdir(exist_ok=True)
 
-    # 创建 .iflow/settings.json
-    settings_path = iflow_dir / "settings.json"
-    if not settings_path.exists():
-        default_settings = {
-            "contextFileName": [
-                "AGENTS.md",
-                "BOOT.md",
-                "BOOTSTRAP.md",
-                "HEARTBEAT.md",
-                "IDENTITY.md",
-                "SOUL.md",
-                "TOOLS.md",
-                "USER.md",
-            ],
-            "approvalMode": "yolo",
-            "language": "zh-CN",
-        }
-        with open(settings_path, "w", encoding="utf-8") as f:
-            json.dump(default_settings, f, indent=2, ensure_ascii=False)
-        console.print(f"[green]{_OK_MARK}[/green] Created {settings_path}")
+        settings_path = iflow_dir / "settings.json"
+        if not settings_path.exists():
+            default_settings = {
+                "contextFileName": [
+                    "AGENTS.md",
+                    "BOOT.md",
+                    "BOOTSTRAP.md",
+                    "HEARTBEAT.md",
+                    "IDENTITY.md",
+                    "SOUL.md",
+                    "TOOLS.md",
+                    "USER.md",
+                ],
+                "approvalMode": "yolo",
+                "language": "zh-CN",
+            }
+            with open(settings_path, "w", encoding="utf-8") as f:
+                json.dump(default_settings, f, indent=2, ensure_ascii=False)
+            console.print(f"[green]{_OK_MARK}[/green] Created {settings_path}")
 
     # 检查 workspace 是否已经初始化（通过检查核心文件是否存在）
     core_files = ["AGENTS.md", "BOOT.md", "SOUL.md"]
@@ -646,26 +648,18 @@ def gateway_start(
 
     # 加载配置
     config = load_config()
-    _mode = (
-        getattr(config.driver, "mode", "cli")
-        if hasattr(config, "driver") and config.driver
-        else "cli"
-    )
+    _backend = config.driver.backend
 
     # 检查并启动 MCP 代理
     # 优先级：命令行参数 > 配置文件
     should_start_mcp = (
         with_mcp
         if with_mcp is not None
-        else (
-            config.driver.mcp_proxy_auto_start
-            if hasattr(config, "driver") and config.driver
-            else True
-        )
+        else (config.driver.iflow.mcp_proxy_auto_start if config.driver.iflow else False)
     )
 
-    if _mode != "claude" and should_start_mcp and config.driver.mcp_proxy_enabled:
-        mcp_port = config.driver.mcp_proxy_port
+    if _backend != "claude" and should_start_mcp and config.driver.iflow and config.driver.iflow.mcp_proxy_enabled:
+        mcp_port = config.driver.iflow.mcp_proxy_port
         if not check_mcp_proxy_running(mcp_port):
             console.print(f"[cyan]正在启动 MCP 代理 (端口: {mcp_port})...[/cyan]")
             if start_mcp_proxy(mcp_port):
@@ -676,15 +670,17 @@ def gateway_start(
             console.print(f"[green]{_OK_MARK}[/green] MCP 代理已在运行 (端口: {mcp_port})")
         console.print()
 
-    # 检查 iflow 是否就绪（claude 模式不需要 iflow）
-    if _mode != "claude" and not ensure_iflow_ready():
+    # 检查后端是否就绪（根据 backend 分发到对应的检查器）
+    _ready, _ready_msg = asyncio.run(check_backend_ready(_backend, config.driver))
+    if not _ready:
+        console.print(f"[red]{_ready_msg}[/red]")
         raise typer.Exit(1)
 
     config = load_config()
     workspace = Path(config.get_workspace())
 
     # 初始化 workspace
-    init_workspace(workspace)
+    init_workspace(workspace, backend=config.driver.backend)
 
     # 检查是否已运行
     pid_file = get_pid_file()
@@ -740,20 +736,18 @@ def gateway_run(
     print_banner()
 
     config = load_config()
-    _mode = (
-        getattr(config.driver, "mode", "cli")
-        if hasattr(config, "driver") and config.driver
-        else "cli"
-    )
+    _backend = config.driver.backend
 
-    # 检查 iflow 是否就绪（claude 模式不需要 iflow）
-    if _mode != "claude" and not ensure_iflow_ready():
+    # 检查后端是否就绪（根据 backend 分发到对应的检查器）
+    _ready, _ready_msg = asyncio.run(check_backend_ready(_backend, config.driver))
+    if not _ready:
+        console.print(f"[red]{_ready_msg}[/red]")
         raise typer.Exit(1)
 
     workspace = Path(config.get_workspace())
 
     # 初始化 workspace
-    init_workspace(workspace)
+    init_workspace(workspace, backend=config.driver.backend)
 
     enabled_channels = config.get_enabled_channels()
     if not enabled_channels:
@@ -908,21 +902,14 @@ async def _run_gateway(config, verbose: bool = False) -> None:
 
     workspace = config.get_workspace()
 
-    # 获取模式配置
-    mode = (
-        getattr(config.driver, "mode", "cli")
-        if hasattr(config, "driver") and config.driver
-        else "cli"
-    )
-    acp_port = (
-        getattr(config.driver, "acp_port", 8090)
-        if hasattr(config, "driver") and config.driver
-        else 8090
-    )
+    # 获取后端和传输配置
+    _backend = config.driver.backend
+    _transport = config.driver.transport
+    acp_port = config.driver.iflow.acp_port if config.driver.iflow else 8090
 
     # ACP 模式：启动 iflow ACP 服务
     acp_process = None
-    if mode == "acp":
+    if _transport == "acp":
         console.print(f"[bold cyan]启动 ACP 服务 (端口: {acp_port})...[/bold cyan]")
         result = await _start_acp_server(acp_port)
         if result is not None:
@@ -939,61 +926,50 @@ async def _run_gateway(config, verbose: bool = False) -> None:
                 console.print(f"[green]{_OK_MARK}[/green] 复用现有 ACP 服务 (端口: {acp_port})")
             else:
                 console.print("[red]✗ ACP 服务启动失败，回退到 CLI 模式[/red]")
-                mode = "cli"
+                _transport = "cli"
 
     # 创建适配器
-    if mode == "claude":
+    if _backend == "claude" and _transport == "stdio":
+        from cli_bridge.engine.claude_stdio_adapter import ClaudeStdioAdapter
+
+        claude_cfg = config.driver.claude
+        adapter = ClaudeStdioAdapter(
+            claude_path=claude_cfg.claude_path,
+            model=claude_cfg.model,
+            workspace=Path(workspace) if workspace else None,
+            permission_mode=claude_cfg.permission_mode,
+            system_prompt=claude_cfg.system_prompt,
+            max_turns=config.driver.max_turns,
+            timeout=config.get_timeout(),
+        )
+    elif _backend == "claude":
         from cli_bridge.engine.claude_adapter import ClaudeAdapter
 
+        claude_cfg = config.driver.claude
         adapter = ClaudeAdapter(
-            claude_path=getattr(config.driver, "claude_path", "claude"),
-            model=getattr(config.driver, "claude_model", "claude-opus-4-6"),
+            claude_path=claude_cfg.claude_path,
+            model=claude_cfg.model,
             workspace=Path(workspace) if workspace else None,
-            permission_mode=getattr(config.driver, "claude_permission_mode", "bypassPermissions"),
-            system_prompt=getattr(config.driver, "claude_system_prompt", ""),
-            max_turns=getattr(config.driver, "max_turns", 40),
+            permission_mode=claude_cfg.permission_mode,
+            system_prompt=claude_cfg.system_prompt,
+            max_turns=config.driver.max_turns,
             timeout=config.get_timeout(),
         )
     else:
+        iflow_cfg = config.driver.iflow
         adapter = IFlowAdapter(
             default_model=config.get_model(),
             workspace=workspace if workspace else None,
             timeout=config.get_timeout(),
-            thinking=config.driver.thinking
-            if hasattr(config, "driver") and config.driver
-            else False,
-            mode=mode,
-            acp_port=acp_port,
-            compression_trigger_tokens=(
-                getattr(config.driver, "compression_trigger_tokens", 88888)
-                if hasattr(config, "driver") and config.driver
-                else 88888
-            ),
-            mcp_proxy_port=(
-                getattr(config.driver, "mcp_proxy_port", 8888)
-                if hasattr(config, "driver") and config.driver
-                else 8888
-            ),
-            mcp_servers_auto_discover=(
-                getattr(config.driver, "mcp_servers_auto_discover", True)
-                if hasattr(config, "driver") and config.driver
-                else True
-            ),
-            mcp_servers_max=(
-                getattr(config.driver, "mcp_servers_max", 10)
-                if hasattr(config, "driver") and config.driver
-                else 10
-            ),
-            mcp_servers_allowlist=(
-                getattr(config.driver, "mcp_servers_allowlist", None)
-                if hasattr(config, "driver") and config.driver
-                else None
-            ),
-            mcp_servers_blocklist=(
-                getattr(config.driver, "mcp_servers_blocklist", None)
-                if hasattr(config, "driver") and config.driver
-                else None
-            ),
+            thinking=iflow_cfg.thinking,
+            transport=_transport,
+            acp_port=iflow_cfg.acp_port,
+            compression_trigger_tokens=iflow_cfg.compression_trigger_tokens,
+            mcp_proxy_port=iflow_cfg.mcp_proxy_port,
+            mcp_servers_auto_discover=iflow_cfg.mcp_servers_auto_discover,
+            mcp_servers_max=iflow_cfg.mcp_servers_max,
+            mcp_servers_allowlist=iflow_cfg.mcp_servers_allowlist or [],
+            mcp_servers_blocklist=iflow_cfg.mcp_servers_blocklist or [],
         )
 
     bus = MessageBus()
@@ -1114,7 +1090,7 @@ async def _run_gateway(config, verbose: bool = False) -> None:
             console.print(f"[dim]  定时任务: {cron_status['jobs']} 个[/dim]")
 
         console.print("[dim]  心跳: 每 30 分钟[/dim]")
-        console.print(f"[dim]  模式: {mode.upper()}[/dim]")
+        console.print(f"[dim]  模式: {_backend.upper()}/{_transport.upper()}[/dim]")
         console.print("[dim]按 Ctrl+C 停止[/dim]")
 
         while True:
@@ -1148,19 +1124,21 @@ def status() -> None:
     config_path = get_config_path()
     pid_file = get_pid_file()
 
-    # iflow 状态
-    console.print("[bold]iflow 状态:[/bold]")
-    if check_iflow_installed():
-        console.print("  iflow: [green]已安装[/green]")
-        if check_iflow_logged_in():
-            console.print("  登录状态: [green]已登录[/green]")
+    # 后端状态（根据 backend 分发到对应的检查器）
+    _status_backend = config.driver.backend
+    _backend_ready, _backend_msg = asyncio.run(check_backend_ready(_status_backend, config.driver))
+    if _status_backend == "claude":
+        console.print("[bold]Claude 状态:[/bold]")
+        if _backend_ready:
+            console.print("  claude CLI: [green]可用[/green]")
         else:
-            console.print("  登录状态: [red]未登录[/red] (运行 [cyan]iflow login[/cyan] 登录)")
+            console.print(f"  claude CLI: [red]不可用[/red] ({_backend_msg})")
     else:
-        console.print("  iflow: [red]未安装[/red]")
-        console.print(
-            "  安装命令: [cyan]npm install -g @anthropic-ai/iflow[/cyan] 或 [cyan]pip install iflow-cli[/cyan]"
-        )
+        console.print("[bold]iflow 状态:[/bold]")
+        if _backend_ready:
+            console.print("  iflow: [green]已安装并已登录[/green]")
+        else:
+            console.print(f"  iflow: [red]未就绪[/red] ({_backend_msg})")
     console.print()
 
     # 服务状态
@@ -1183,9 +1161,13 @@ def status() -> None:
     console.print("[bold]配置信息:[/bold]")
     console.print(f"  Config: [cyan]{config_path}[/cyan]")
     console.print(f"  Workspace: [cyan]{config.get_workspace() or 'Not set'}[/cyan]")
+    console.print(f"  Backend: [cyan]{config.driver.backend}[/cyan]  Transport: [cyan]{config.driver.transport}[/cyan]")
     console.print(f"  Model: [cyan]{config.get_model()}[/cyan]")
-    thinking = config.driver.thinking if hasattr(config, "driver") and config.driver else False
-    console.print(f"  Thinking: [cyan]{'启用' if thinking else '禁用'}[/cyan]")
+    if config.driver.iflow:
+        console.print(f"  Thinking: [cyan]{'启用' if config.driver.iflow.thinking else '禁用'}[/cyan]")
+        console.print(f"  MCP Proxy: [cyan]{'启用' if config.driver.iflow.mcp_proxy_enabled else '禁用'}[/cyan]")
+    elif config.driver.claude:
+        console.print(f"  Permission Mode: [cyan]{config.driver.claude.permission_mode}[/cyan]")
     console.print()
 
     # 渠道状态
@@ -1242,7 +1224,10 @@ def model(
         from cli_bridge.config.schema import DriverConfig
 
         config.driver = DriverConfig()
-    config.driver.model = name
+    if config.driver.backend == "claude" and config.driver.claude:
+        config.driver.claude.model = name
+    elif config.driver.iflow:
+        config.driver.iflow.model = name
     save_config(config)
 
     console.print(f"[green]{_OK_MARK}[/green] Model set to: [cyan]{name}[/cyan]")
@@ -1295,29 +1280,14 @@ def sessions(
     config = load_config()
     workspace = config.get_workspace()
 
+    iflow_cfg = config.driver.iflow
     adapter = IFlowAdapter(
         default_model=config.get_model(),
         workspace=workspace if workspace else None,
-        compression_trigger_tokens=(
-            getattr(config.driver, "compression_trigger_tokens", 88888)
-            if hasattr(config, "driver") and config.driver
-            else 88888
-        ),
-        mcp_proxy_port=(
-            getattr(config.driver, "mcp_proxy_port", 8888)
-            if hasattr(config, "driver") and config.driver
-            else 8888
-        ),
-        mcp_servers_auto_discover=(
-            getattr(config.driver, "mcp_servers_auto_discover", True)
-            if hasattr(config, "driver") and config.driver
-            else True
-        ),
-        mcp_servers_max=(
-            getattr(config.driver, "mcp_servers_max", 10)
-            if hasattr(config, "driver") and config.driver
-            else 10
-        ),
+        compression_trigger_tokens=iflow_cfg.compression_trigger_tokens if iflow_cfg else 60000,
+        mcp_proxy_port=iflow_cfg.mcp_proxy_port if iflow_cfg else 8888,
+        mcp_servers_auto_discover=iflow_cfg.mcp_servers_auto_discover if iflow_cfg else True,
+        mcp_servers_max=iflow_cfg.mcp_servers_max if iflow_cfg else 10,
     )
     mappings = adapter.session_mappings
 

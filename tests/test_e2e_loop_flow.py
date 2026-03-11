@@ -1,4 +1,3 @@
-import asyncio
 from pathlib import Path
 
 import pytest
@@ -27,6 +26,9 @@ class FakeAdapter:
         self._stream_chunks: list[str] = []
         self._stream_response: str = ""
 
+    def clear_session(self, channel: str, chat_id: str) -> bool:
+        return self.session_mappings.clear_session(channel, chat_id)
+
     async def chat(self, message: str, channel: str, chat_id: str, model: str):
         self.chat_calls.append(
             {
@@ -38,7 +40,7 @@ class FakeAdapter:
         )
         return "OK:non-stream"
 
-    async def chat_stream(self, message: str, channel: str, chat_id: str, model: str, on_chunk):
+    async def chat_stream(self, message: str, channel: str, chat_id: str, model: str, on_chunk=None, on_tool_call=None, on_event=None, **kwargs):
         self.stream_calls.append(
             {
                 "message": message,
