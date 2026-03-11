@@ -91,8 +91,8 @@ class AgentLoop:
             - 否则如果 AGENTS.md 存在，返回 (AGENTS内容, False)
             - 都不存在，返回 (None, False)
         """
-        # stdio/acp/claude 模式下，AGENTS 通过 session system_prompt 注入，避免每条消息重复注入
-        inline_agents = getattr(self.adapter, "mode", "cli") not in {"stdio", "acp", "claude"}
+        # long-lived adapters inject AGENTS via session system_prompt; cli adapters need inline injection
+        inline_agents = getattr(self.adapter, "inline_agents", True)
 
         # 优先检查 BOOTSTRAP.md
         bootstrap_file = self.workspace / "BOOTSTRAP.md"

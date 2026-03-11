@@ -1,78 +1,87 @@
-"""Tests for config migration detection and v2 schema loading."""
+"""Tests for config schema loading with backend + transport fields."""
 
 import json
 
 import pytest
 from pydantic import ValidationError
 
-from cli_bridge.config.loader import ConfigMigrationError, load_config
+from cli_bridge.config.loader import load_config
 from cli_bridge.config.schema import Config, DriverConfig
 
-# ── ConfigMigrationError detection ───────────────────────────────────────────
 
-def test_v1_flat_iflow_path_raises_migration_error(tmp_path):
-    """v1 config with flat iflow_path in driver raises ConfigMigrationError."""
+# ── New backend + transport format ───────────────────────────────────────────
+
+def test_new_backend_transport_round_trip(tmp_path):
+    """Config with backend/transport fields loads correctly."""
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text(json.dumps({
         "driver": {
-            "mode": "stdio",
-            "iflow_path": "/usr/local/bin/iflow",
+            "backend": "iflow",
+            "transport": "stdio",
+            "iflow": {"iflow_path": "iflow", "model": "minimax-m2.5"},
         }
     }), encoding="utf-8")
 
-    with pytest.raises(ConfigMigrationError) as exc_info:
-        load_config(cfg_file, auto_create=False)
+    config = load_config(cfg_file, auto_create=False)
 
-    assert "Legacy config format detected" in str(exc_info.value)
-    assert "iflow_path" in str(exc_info.value)
+    assert config.driver.backend == "iflow"
+    assert config.driver.transport == "stdio"
+    assert config.driver.iflow is not None
+    assert config.driver.iflow.model == "minimax-m2.5"
+    assert config.driver.claude is None
 
 
-def test_v1_flat_claude_model_raises_migration_error(tmp_path):
-    """v1 config with flat claude_model in driver raises ConfigMigrationError."""
+def test_new_claude_stdio_combination():
+    """backend='claude', transport='stdio' is valid."""
+    d = DriverConfig(backend="claude", transport="stdio")
+    assert d.backend == "claude"
+    assert d.transport == "stdio"
+
+
+def test_claude_acp_combination_raises_validation_error():
+    """backend='claude' + transport='acp' is not supported."""
+    with pytest.raises((ValidationError, ValueError)):
+        DriverConfig(backend="claude", transport="acp")
+
+
+def test_iflow_cli_combination():
+    """backend='iflow', transport='cli' is valid."""
+    d = DriverConfig(backend="iflow", transport="cli")
+    assert d.backend == "iflow"
+    assert d.transport == "cli"
+    assert d.iflow is not None
+
+
+def test_iflow_stdio_combination():
+    """backend='iflow', transport='stdio' is valid."""
+    d = DriverConfig(backend="iflow", transport="stdio")
+    assert d.backend == "iflow"
+    assert d.transport == "stdio"
+
+
+def test_iflow_acp_combination():
+    """backend='iflow', transport='acp' is valid."""
+    d = DriverConfig(backend="iflow", transport="acp")
+    assert d.backend == "iflow"
+    assert d.transport == "acp"
+
+
+def test_claude_cli_combination():
+    """backend='claude', transport='cli' is valid."""
+    d = DriverConfig(backend="claude", transport="cli")
+    assert d.backend == "claude"
+    assert d.transport == "cli"
+
+
+# ── Config file loading ───────────────────────────────────────────────────────
+
+def test_claude_config_loads_correctly(tmp_path):
+    """Claude config loads successfully; driver.iflow is None."""
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text(json.dumps({
         "driver": {
-            "mode": "claude",
-            "claude_model": "claude-opus-4-6",
-            "claude_path": "claude",
-        }
-    }), encoding="utf-8")
-
-    with pytest.raises(ConfigMigrationError) as exc_info:
-        load_config(cfg_file, auto_create=False)
-
-    assert "claude_model" in str(exc_info.value)
-
-
-def test_v1_multiple_legacy_fields_listed_in_error(tmp_path):
-    """Error message lists all detected legacy fields."""
-    cfg_file = tmp_path / "config.json"
-    cfg_file.write_text(json.dumps({
-        "driver": {
-            "mode": "stdio",
-            "iflow_path": "iflow",
-            "yolo": True,
-            "acp_port": 8090,
-        }
-    }), encoding="utf-8")
-
-    with pytest.raises(ConfigMigrationError) as exc_info:
-        load_config(cfg_file, auto_create=False)
-
-    msg = str(exc_info.value)
-    assert "iflow_path" in msg
-    assert "yolo" in msg
-    assert "acp_port" in msg
-
-
-# ── v2 claude-mode config loading ────────────────────────────────────────────
-
-def test_v2_claude_mode_config_loads_without_iflow(tmp_path):
-    """v2 claude-mode config loads successfully; driver.iflow is None."""
-    cfg_file = tmp_path / "config.json"
-    cfg_file.write_text(json.dumps({
-        "driver": {
-            "mode": "claude",
+            "backend": "claude",
+            "transport": "cli",
             "claude": {
                 "claude_path": "claude",
                 "model": "claude-opus-4-6",
@@ -83,33 +92,35 @@ def test_v2_claude_mode_config_loads_without_iflow(tmp_path):
 
     config = load_config(cfg_file, auto_create=False)
 
-    assert config.driver.mode == "claude"
+    assert config.driver.backend == "claude"
+    assert config.driver.transport == "cli"
     assert config.driver.claude is not None
     assert config.driver.claude.model == "claude-opus-4-6"
     assert config.driver.iflow is None
 
 
-def test_v2_claude_mode_auto_populates_defaults(tmp_path):
-    """When claude block absent in claude mode, defaults are auto-populated."""
+def test_claude_auto_populates_defaults(tmp_path):
+    """When claude block absent in claude backend, defaults are auto-populated."""
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text(json.dumps({
-        "driver": {"mode": "claude"}
+        "driver": {"backend": "claude", "transport": "cli"}
     }), encoding="utf-8")
 
     config = load_config(cfg_file, auto_create=False)
 
-    assert config.driver.mode == "claude"
+    assert config.driver.backend == "claude"
     assert config.driver.claude is not None
     assert config.driver.claude.claude_path == "claude"
     assert config.driver.iflow is None
 
 
-def test_v2_iflow_mode_config_loads_without_claude(tmp_path):
-    """v2 iflow stdio-mode config loads; driver.claude is None."""
+def test_iflow_config_loads_without_claude_block(tmp_path):
+    """iflow config loads; driver.claude is None."""
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text(json.dumps({
         "driver": {
-            "mode": "stdio",
+            "backend": "iflow",
+            "transport": "stdio",
             "iflow": {
                 "iflow_path": "iflow",
                 "model": "minimax-m2.5",
@@ -119,99 +130,101 @@ def test_v2_iflow_mode_config_loads_without_claude(tmp_path):
 
     config = load_config(cfg_file, auto_create=False)
 
-    assert config.driver.mode == "stdio"
+    assert config.driver.backend == "iflow"
+    assert config.driver.transport == "stdio"
     assert config.driver.iflow is not None
     assert config.driver.iflow.model == "minimax-m2.5"
     assert config.driver.claude is None
 
 
-# ── get_model() dispatch ─────────────────────────────────────────────────────
+# ── get_model() dispatch ──────────────────────────────────────────────────────
 
-def test_get_model_returns_iflow_model_in_stdio_mode():
-    config = Config(driver=DriverConfig(mode="stdio"))
+def test_get_model_returns_iflow_model():
+    config = Config(driver=DriverConfig(backend="iflow", transport="stdio"))
     assert config.get_model() == "minimax-m2.5"
 
 
-def test_get_model_returns_claude_model_in_claude_mode():
-    config = Config(driver=DriverConfig(mode="claude"))
+def test_get_model_returns_claude_model():
+    config = Config(driver=DriverConfig(backend="claude", transport="cli"))
     assert config.get_model() == "claude-opus-4-6"
 
 
 # ── per-backend separation ────────────────────────────────────────────────────
 
-def test_iflow_only_v2_config_has_no_claude_block(tmp_path):
-    """iflow-only v2 config loads with driver.claude is None."""
+def test_iflow_config_has_no_claude_block(tmp_path):
+    """iflow config loads with driver.claude is None."""
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text(json.dumps({
         "driver": {
-            "mode": "cli",
+            "backend": "iflow",
+            "transport": "cli",
             "iflow": {"iflow_path": "iflow", "model": "minimax-m2.5"}
         }
     }), encoding="utf-8")
 
     config = load_config(cfg_file, auto_create=False)
 
-    assert config.driver.mode == "cli"
+    assert config.driver.backend == "iflow"
+    assert config.driver.transport == "cli"
     assert config.driver.iflow is not None
     assert config.driver.claude is None
 
 
-def test_claude_only_v2_config_has_no_iflow_block(tmp_path):
-    """claude-only v2 config loads with driver.iflow is None."""
+def test_claude_config_has_no_iflow_block(tmp_path):
+    """claude config loads with driver.iflow is None."""
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text(json.dumps({
         "driver": {
-            "mode": "claude",
+            "backend": "claude",
+            "transport": "cli",
             "claude": {"claude_path": "claude", "model": "claude-opus-4-6"}
         }
     }), encoding="utf-8")
 
     config = load_config(cfg_file, auto_create=False)
 
-    assert config.driver.mode == "claude"
+    assert config.driver.backend == "claude"
     assert config.driver.claude is not None
     assert config.driver.iflow is None
 
 
-def test_invalid_mode_raises_validation_error():
-    """An invalid mode value raises Pydantic ValidationError."""
-    with pytest.raises(ValidationError) as exc_info:
-        DriverConfig(mode="unknown_backend")
-
-    assert "mode" in str(exc_info.value).lower() or "literal" in str(exc_info.value).lower()
-
-
-def test_acp_mode_populates_iflow_block():
-    """acp mode auto-populates driver.iflow with defaults."""
-    config = Config(driver=DriverConfig(mode="acp"))
+def test_acp_transport_populates_iflow_block():
+    """acp transport auto-populates driver.iflow with defaults."""
+    config = Config(driver=DriverConfig(backend="iflow", transport="acp"))
+    assert config.driver.backend == "iflow"
+    assert config.driver.transport == "acp"
     assert config.driver.iflow is not None
     assert config.driver.iflow.acp_port == 8090
     assert config.driver.claude is None
 
 
-# ── _create_default_config mode branching ────────────────────────────────────
+# ── _create_default_config format ────────────────────────────────────────────
 
-def test_default_config_stdio_mode_writes_iflow_block(tmp_path):
-    """_create_default_config writes iflow block for stdio mode."""
+def test_default_config_iflow_writes_iflow_block(tmp_path):
+    """_create_default_config writes iflow block using backend/transport format."""
     from cli_bridge.config.loader import _create_default_config
 
     cfg_file = tmp_path / "config.json"
-    _create_default_config(cfg_file, mode="stdio")
+    _create_default_config(cfg_file, backend="iflow", transport="stdio")
 
     data = json.loads(cfg_file.read_text(encoding="utf-8"))
     assert "iflow" in data["driver"]
     assert "claude" not in data["driver"]
-    assert data["driver"]["mode"] == "stdio"
+    assert data["driver"]["backend"] == "iflow"
+    assert data["driver"]["transport"] == "stdio"
+    assert "mode" not in data["driver"]
 
 
-def test_default_config_claude_mode_writes_claude_block(tmp_path):
-    """_create_default_config writes claude block (no iflow) for claude mode."""
+def test_default_config_claude_writes_claude_block(tmp_path):
+    """_create_default_config writes claude block using backend/transport format."""
     from cli_bridge.config.loader import _create_default_config
 
     cfg_file = tmp_path / "config.json"
-    _create_default_config(cfg_file, mode="claude")
+    _create_default_config(cfg_file, backend="claude", transport="cli")
 
     data = json.loads(cfg_file.read_text(encoding="utf-8"))
     assert "claude" in data["driver"]
     assert "iflow" not in data["driver"]
-    assert data["driver"]["mode"] == "claude"
+    assert data["driver"]["backend"] == "claude"
+    assert data["driver"]["transport"] == "cli"
+    assert "mode" not in data["driver"]

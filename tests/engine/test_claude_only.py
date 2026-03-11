@@ -37,10 +37,10 @@ def test_claude_adapter_is_base_adapter(tmp_path):
     assert isinstance(adapter, BaseAdapter)
 
 
-def test_claude_adapter_mode_property(tmp_path):
-    """mode property returns 'claude'."""
+def test_claude_adapter_transport_property(tmp_path):
+    """transport property returns 'cli'."""
     adapter = _make_adapter(tmp_path)
-    assert adapter.mode == "claude"
+    assert adapter.transport == "cli"
 
 
 def test_claude_adapter_uses_v2_config_fields(tmp_path):

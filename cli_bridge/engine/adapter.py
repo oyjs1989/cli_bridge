@@ -116,7 +116,7 @@ class IFlowAdapter(BaseAdapter):
         iflow_path: str = "iflow",
         workspace: Path | None = None,
         thinking: bool = False,
-        mode: Literal["cli", "acp", "stdio"] = "cli",
+        transport: Literal["cli", "acp", "stdio"] = "cli",
         acp_host: str = "localhost",
         acp_port: int = 8090,
         compression_trigger_tokens: int = 60000,
@@ -130,7 +130,7 @@ class IFlowAdapter(BaseAdapter):
         self.thinking = thinking
         self.timeout = timeout
         self.iflow_path = iflow_path
-        self._mode = mode
+        self._transport = transport
         self.acp_host = acp_host
         self.acp_port = acp_port
         self.compression_trigger_tokens = max(0, int(compression_trigger_tokens))
@@ -159,18 +159,22 @@ class IFlowAdapter(BaseAdapter):
         # Stdio ACP 模式适配器（懒加载）
         self._stdio_adapter: StdioACPAdapter | None = None
 
-        logger.info(f"IFlowAdapter: mode={mode}, workspace={self.workspace}, model={default_model}, thinking={thinking}")
+        logger.info(f"IFlowAdapter: transport={self._transport}, workspace={self.workspace}, model={default_model}, thinking={thinking}")
 
     @property
-    def mode(self) -> str:
-        """活跃模式标识符 ('cli', 'stdio', 'acp')。"""
-        return self._mode
+    def transport(self) -> str:
+        """Transport identifier ('cli', 'stdio', 'acp')."""
+        return self._transport
+
+    @property
+    def inline_agents(self) -> bool:
+        return self._transport == "cli"
 
     def clear_session(self, channel: str, chat_id: str) -> bool:
         """清除指定渠道+聊天ID的会话映射。Returns True if a session existed."""
-        if self._mode == "acp" and self._acp_adapter:
+        if self._transport == "acp" and self._acp_adapter:
             return self._acp_adapter.clear_session(channel, chat_id)
-        elif self._mode == "stdio" and self._stdio_adapter:
+        elif self._transport == "stdio" and self._stdio_adapter:
             return self._stdio_adapter.clear_session(channel, chat_id)
         else:
             return self.session_mappings.clear_session(channel, chat_id)
@@ -401,9 +405,9 @@ class IFlowAdapter(BaseAdapter):
         - acp: 通过 WebSocket 连接 iflow ACP 服务
         - stdio: 通过 stdio 直接与 iflow --experimental-acp 通信
         """
-        if self._mode == "acp":
+        if self._transport == "acp":
             return await self._chat_acp(message, channel, chat_id, model, timeout)
-        elif self._mode == "stdio":
+        elif self._transport == "stdio":
             return await self._chat_stdio(message, channel, chat_id, model, timeout)
         else:
             return await self._chat_cli(message, channel, chat_id, model, timeout)
@@ -516,8 +520,8 @@ class IFlowAdapter(BaseAdapter):
         Returns:
             最终响应文本
         """
-        if self._mode == "acp" or self._mode == "stdio":
-            if self._mode == "acp":
+        if self._transport == "acp" or self._transport == "stdio":
+            if self._transport == "acp":
                 adapter = await self._get_acp_adapter()
                 from cli_bridge.engine.acp import AgentMessageChunk
                 logger.info(f"Chat Stream (ACP): {channel}:{chat_id}")
@@ -569,7 +573,7 @@ class IFlowAdapter(BaseAdapter):
         timeout: int | None = None,
     ) -> str:
         """开始新对话。"""
-        if self._mode == "acp":
+        if self._transport == "acp":
             adapter = await self._get_acp_adapter()
             adapter.clear_session(channel, chat_id)
             logger.info(f"Cleared ACP session for {channel}:{chat_id}, starting fresh")
@@ -580,7 +584,7 @@ class IFlowAdapter(BaseAdapter):
                 model=model or self.default_model,
                 timeout=timeout or self.timeout,
             )
-        elif self._mode == "stdio":
+        elif self._transport == "stdio":
             adapter = await self._get_stdio_adapter()
             adapter.clear_session(channel, chat_id)
             logger.info(f"Cleared Stdio session for {channel}:{chat_id}, starting fresh")
@@ -635,11 +639,11 @@ class IFlowAdapter(BaseAdapter):
 
     async def health_check(self) -> bool:
         """检查 iflow 是否可用。"""
-        if self._mode == "acp":
+        if self._transport == "acp":
             if self._acp_adapter:
                 return await self._acp_adapter.health_check()
             return False
-        elif self._mode == "stdio":
+        elif self._transport == "stdio":
             if self._stdio_adapter:
                 return await self._stdio_adapter.health_check()
             return False

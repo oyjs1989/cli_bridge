@@ -127,8 +127,12 @@ class ClaudeAdapter(BaseAdapter):
     """
 
     @property
-    def mode(self) -> str:
-        return "claude"
+    def transport(self) -> str:
+        return "cli"
+
+    @property
+    def inline_agents(self) -> bool:
+        return False
 
     def __init__(
         self,

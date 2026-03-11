@@ -189,7 +189,7 @@ class ChannelsConfig(BaseModel):
 class IFlowBackendConfig(BaseModel):
     """iflow 后端专属配置。
 
-    仅在 driver.mode ∈ {cli, stdio, acp} 时使用。
+    仅在 driver.backend == "iflow" 时使用。
     """
 
     model_config = {"extra": "ignore"}
@@ -248,7 +248,7 @@ class IFlowBackendConfig(BaseModel):
 class ClaudeBackendConfig(BaseModel):
     """Claude Code 后端专属配置。
 
-    仅在 driver.mode == "claude" 时使用。
+    仅在 driver.backend == "claude" 时使用。
     """
 
     model_config = {"extra": "ignore"}
@@ -273,8 +273,11 @@ class DriverConfig(BaseModel):
 
     model_config = {"extra": "ignore"}
 
-    mode: Literal["cli", "acp", "stdio", "claude"] = "stdio"
-    """通信模式: cli (子进程调用), acp (WebSocket), stdio (直接通过 stdin/stdout), 或 claude (Claude Code)。"""
+    backend: Literal["iflow", "claude"] = "iflow"
+    """AI 后端: iflow 或 claude。"""
+
+    transport: Literal["cli", "stdio", "acp"] = "stdio"
+    """通信方式: cli (子进程), stdio (长运行进程), acp (WebSocket)。"""
 
     max_turns: int = 40
     """最大对话轮数（所有后端共用）。"""
@@ -287,17 +290,27 @@ class DriverConfig(BaseModel):
 
     # 后端专属嵌套配置
     iflow: IFlowBackendConfig | None = None
-    """iflow 专属配置。mode ∈ {cli, stdio, acp} 时自动填充默认值。"""
+    """iflow 专属配置。backend == "iflow" 时自动填充默认值。"""
 
     claude: ClaudeBackendConfig | None = None
-    """Claude Code 专属配置。mode == "claude" 时自动填充默认值。"""
+    """Claude Code 专属配置。backend == "claude" 时自动填充默认值。"""
+
+    @model_validator(mode="after")
+    def validate_combination(self) -> "DriverConfig":
+        """拒绝不支持的 backend + transport 组合。"""
+        if self.backend == "claude" and self.transport == "acp":
+            raise ValueError(
+                "backend='claude' + transport='acp' is not yet supported. "
+                "Use transport='cli' or transport='stdio' with the claude backend."
+            )
+        return self
 
     @model_validator(mode="after")
     def populate_backend_config(self) -> "DriverConfig":
-        """根据 mode 自动填充对应的后端配置（如未显式提供）。"""
-        if self.mode in ("cli", "stdio", "acp") and self.iflow is None:
+        """根据 backend 自动填充对应的后端配置（如未显式提供）。"""
+        if self.backend == "iflow" and self.iflow is None:
             self.iflow = IFlowBackendConfig()
-        elif self.mode == "claude" and self.claude is None:
+        elif self.backend == "claude" and self.claude is None:
             self.claude = ClaudeBackendConfig()
         return self
 
@@ -360,11 +373,11 @@ class Config(BaseSettings):
     def get_model(self) -> str:
         """获取模型名称。
 
-        根据 driver.mode 从对应的后端配置中读取模型名称。
+        根据 driver.backend 从对应的后端配置中读取模型名称。
         """
-        if self.driver.mode in ("cli", "stdio", "acp") and self.driver.iflow:
+        if self.driver.backend == "iflow" and self.driver.iflow:
             return self.driver.iflow.model
-        elif self.driver.mode == "claude" and self.driver.claude:
+        elif self.driver.backend == "claude" and self.driver.claude:
             return self.driver.claude.model
         return "minimax-m2.5"
 

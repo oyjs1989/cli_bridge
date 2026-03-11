@@ -7,7 +7,7 @@ Usage::
 
     from cli_bridge.cli.health import check_backend_ready
 
-    ready, message = await check_backend_ready(config.driver.mode, config.driver)
+    ready, message = await check_backend_ready(config.driver.backend, config.driver)
     if not ready:
         console.print(f"[red]{message}[/red]")
 """
@@ -92,27 +92,27 @@ async def _check_iflow_ready(iflow_path: str) -> tuple[bool, str]:
 
 
 async def check_backend_ready(
-    mode: str,
+    backend: str,
     driver: DriverConfig | None = None,
 ) -> tuple[bool, str]:
     """Dispatch to the appropriate backend health check.
 
     Args:
-        mode: Active driver mode ('claude', 'cli', 'stdio', 'acp').
+        backend: Active driver backend ('claude' or 'iflow').
         driver: DriverConfig instance (used to resolve binary paths).
 
     Returns:
         Tuple of (is_ready: bool, message: str).
     """
-    if mode == "claude":
+    if backend == "claude":
         claude_path = "claude"
         if driver and driver.claude:
             claude_path = driver.claude.claude_path
-        logger.debug(f"Health check: claude mode, binary={claude_path}")
+        logger.debug(f"Health check: claude backend, binary={claude_path}")
         return await _check_claude_ready(claude_path)
     else:
         iflow_path = "iflow"
         if driver and driver.iflow:
             iflow_path = driver.iflow.iflow_path
-        logger.debug(f"Health check: iflow mode={mode}, binary={iflow_path}")
+        logger.debug(f"Health check: iflow backend, binary={iflow_path}")
         return await _check_iflow_ready(iflow_path)

@@ -90,6 +90,7 @@ Tests use `FakeAdapter` patterns to stub out actual CLI execution. The `asyncio_
 ## Active Technologies
 - Python 3.10+ (targets 3.10, 3.11, 3.12) + Pydantic v2 (config), Typer (CLI), FastAPI + Uvicorn (Web UI), `claude-agent-sdk` (Claude backend), asyncio (concurrency), loguru (logging) (001-decouple-iflow-backend)
 - JSON config file at `~/.cli-bridge/config.json`; session mappings at `~/.cli-bridge/session_mappings.json`; workspace markdown files at configurable path (001-decouple-iflow-backend)
+- Python 3.10+ (targets 3.10, 3.11, 3.12) + Pydantic v2 (config/validation), Typer (CLI), loguru (logging), claude-agent-sdk (Claude backend) (002-split-driver-config)
 
 ## Recent Changes
 - 001-decouple-iflow-backend: Added Python 3.10+ (targets 3.10, 3.11, 3.12) + Pydantic v2 (config), Typer (CLI), FastAPI + Uvicorn (Web UI), `claude-agent-sdk` (Claude backend), asyncio (concurrency), loguru (logging)

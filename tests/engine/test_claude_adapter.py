@@ -189,11 +189,11 @@ async def test_health_check_returns_true_when_claude_found(tmp_path):
     assert isinstance(result, bool)
 
 
-# ── mode attribute ────────────────────────────────────────────────────────────
+# ── transport attribute ───────────────────────────────────────────────────────
 
-def test_mode_is_claude(tmp_path):
+def test_transport_is_cli(tmp_path):
     adapter = ClaudeAdapter(workspace=tmp_path)
-    assert adapter.mode == "claude"
+    assert adapter.transport == "cli"
 
 
 # ── NODE_TLS_REJECT_UNAUTHORIZED ──────────────────────────────────────────────

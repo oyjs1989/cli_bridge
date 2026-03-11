@@ -631,16 +631,17 @@ class ConsoleService:
             if self._chat_adapter is not None:
                 return self._chat_adapter
             cfg = self.get_config_obj()
+            iflow_cfg = cfg.driver.iflow
             self._chat_adapter = IFlowAdapter(
                 default_model=cfg.get_model(),
                 workspace=cfg.get_workspace(),
-                iflow_path=cfg.driver.iflow_path,
-                mode=cfg.driver.mode,
-                thinking=cfg.driver.thinking,
+                iflow_path=iflow_cfg.iflow_path if iflow_cfg else "iflow",
+                transport=cfg.driver.transport,
+                thinking=iflow_cfg.thinking if iflow_cfg else False,
                 timeout=cfg.driver.timeout,
-                acp_host=cfg.driver.acp_host,
-                acp_port=cfg.driver.acp_port,
-                compression_trigger_tokens=getattr(cfg.driver, "compression_trigger_tokens", 88888),
+                acp_host=iflow_cfg.acp_host if iflow_cfg else "localhost",
+                acp_port=iflow_cfg.acp_port if iflow_cfg else 8090,
+                compression_trigger_tokens=iflow_cfg.compression_trigger_tokens if iflow_cfg else 60000,
             )
             return self._chat_adapter
 
@@ -1035,20 +1036,20 @@ class ConsoleService:
                 await emit(
                     "status",
                     {
-                        "mode": adapter.mode,
+                        "transport": adapter.transport,
                         "model": selected_model_id,
                         "think": think_enabled,
                         "runtime_mode": selected_mode,
-                        "message": f"mode={adapter.mode}, model={selected_model_id}, think={think_enabled}, runtime={selected_mode}",
+                        "message": f"transport={adapter.transport}, model={selected_model_id}, think={think_enabled}, runtime={selected_mode}",
                     },
                 )
                 self.add_web_log(
-                    f"chat.start sid={session_id} channel={effective_channel} chat_id={effective_chat_id} mode={adapter.mode} runtime={selected_mode} model={selected_model_id} think={think_enabled}"
+                    f"chat.start sid={session_id} channel={effective_channel} chat_id={effective_chat_id} transport={adapter.transport} runtime={selected_mode} model={selected_model_id} think={think_enabled}"
                 )
                 await emit("phase", {"phase": "preparing", "status": "completed"})
                 await emit("phase", {"phase": "runtime_config", "status": "in_progress"})
 
-                if adapter.mode == "stdio":
+                if adapter.transport == "stdio":
                     low = await adapter._get_stdio_adapter()
                     runtime_session_id = await low._get_or_create_session(effective_channel, effective_chat_id, selected_model_id)
                     runtime_result = await self._apply_runtime_settings(
@@ -1071,7 +1072,7 @@ class ConsoleService:
                         on_tool_call=on_tool_call,
                         on_event=on_runtime_event,
                     )
-                elif adapter.mode == "acp":
+                elif adapter.transport == "acp":
                     low = await adapter._get_acp_adapter()
                     runtime_session_id = await low._get_or_create_session(effective_channel, effective_chat_id, selected_model_id)
                     runtime_result = await self._apply_runtime_settings(
@@ -1365,9 +1366,9 @@ def create_app(token: str | None = None) -> FastAPI:
                 "messages": service.get_or_load_chat_messages("web", session_id),
                 "default_model": default_model,
                 "default_model_raw": default_model_raw,
-                "driver_mode": cfg.driver.mode,
-                "default_runtime_mode": "yolo" if cfg.driver.yolo else "default",
-                "default_think_enabled": cfg.driver.thinking,
+                "driver_backend": cfg.driver.backend,
+                "default_runtime_mode": "yolo" if (cfg.driver.iflow and cfg.driver.iflow.yolo) else "default",
+                "default_think_enabled": cfg.driver.iflow.thinking if cfg.driver.iflow else False,
                 "model_options": model_options,
                 "model_context_sizes": MODEL_CONTEXT_SIZES,
                 "runtime_modes": RUNTIME_MODES,
@@ -1540,11 +1541,11 @@ def create_app(token: str | None = None) -> FastAPI:
                 "channel_states": channel_states,
                 "enabled_count": enabled_count,
                 "channel_total": len(channel_states),
-                "driver_mode": cfg.driver.mode,
-                "driver_model": cfg.driver.model,
+                "driver_backend": cfg.driver.backend,
+                "driver_model": cfg.get_model(),
                 "driver_timeout": cfg.driver.timeout,
-                "driver_think": cfg.driver.thinking,
-                "driver_yolo": cfg.driver.yolo,
+                "driver_think": cfg.driver.iflow.thinking if cfg.driver.iflow else False,
+                "driver_yolo": cfg.driver.iflow.yolo if cfg.driver.iflow else False,
                 "config_path": str(service.config_path),
                 "token": token or "",
             },
@@ -1568,11 +1569,11 @@ def create_app(token: str | None = None) -> FastAPI:
                 "channel_states": channel_states,
                 "enabled_count": len([c for c in channel_states if c["enabled"]]),
                 "channel_total": len(channel_states),
-                "driver_mode": cfg.driver.mode,
-                "driver_model": cfg.driver.model,
+                "driver_backend": cfg.driver.backend,
+                "driver_model": cfg.get_model(),
                 "driver_timeout": cfg.driver.timeout,
-                "driver_think": cfg.driver.thinking,
-                "driver_yolo": cfg.driver.yolo,
+                "driver_think": cfg.driver.iflow.thinking if cfg.driver.iflow else False,
+                "driver_yolo": cfg.driver.iflow.yolo if cfg.driver.iflow else False,
                 "config_path": str(service.config_path),
                 "token": token or "",
             },
@@ -1640,11 +1641,11 @@ def create_app(token: str | None = None) -> FastAPI:
                         "channel_states": channel_states,
                         "enabled_count": len([c for c in channel_states if c["enabled"]]),
                         "channel_total": len(channel_states),
-                        "driver_mode": cfg.driver.mode,
-                        "driver_model": cfg.driver.model,
+                        "driver_backend": cfg.driver.backend,
+                        "driver_model": cfg.get_model(),
                         "driver_timeout": cfg.driver.timeout,
-                        "driver_think": cfg.driver.thinking,
-                        "driver_yolo": cfg.driver.yolo,
+                        "driver_think": cfg.driver.iflow.thinking if cfg.driver.iflow else False,
+                        "driver_yolo": cfg.driver.iflow.yolo if cfg.driver.iflow else False,
                         "config_path": str(service.config_path),
                         "token": token or "",
                     },
@@ -1669,11 +1670,11 @@ def create_app(token: str | None = None) -> FastAPI:
                 "channel_states": channel_states,
                 "enabled_count": len([c for c in channel_states if c["enabled"]]),
                 "channel_total": len(channel_states),
-                "driver_mode": cfg.driver.mode,
-                "driver_model": cfg.driver.model,
+                "driver_backend": cfg.driver.backend,
+                "driver_model": cfg.get_model(),
                 "driver_timeout": cfg.driver.timeout,
-                "driver_think": cfg.driver.thinking,
-                "driver_yolo": cfg.driver.yolo,
+                "driver_think": cfg.driver.iflow.thinking if cfg.driver.iflow else False,
+                "driver_yolo": cfg.driver.iflow.yolo if cfg.driver.iflow else False,
                 "config_path": str(service.config_path),
                 "token": token or "",
             },

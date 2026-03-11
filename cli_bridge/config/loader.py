@@ -10,31 +10,6 @@ from cli_bridge.config.schema import Config
 
 # 统一的超时常量定义
 DEFAULT_TIMEOUT = 180  # 默认超时时间（秒）
-LEGACY_DEFAULT_TIMEOUT = 300  # 旧版默认值，用于迁移检测
-
-# v1 遗留的扁平化字段（现已移入嵌套的 iflow/claude 配置块）
-_LEGACY_FLAT_FIELDS = {
-    "iflow_path", "yolo", "compression_trigger_tokens",
-    "claude_path", "claude_model", "mcp_proxy_enabled",
-    "acp_port", "acp_host", "extra_args", "disable_mcp",
-}
-
-
-class ConfigMigrationError(ValueError):
-    """当检测到 v1 扁平配置格式时抛出。"""
-    pass
-
-
-def _check_for_legacy_config(raw_driver: dict) -> None:
-    """检查 driver 字典中是否存在 v1 遗留字段，若有则抛出 ConfigMigrationError。"""
-    found = [f for f in _LEGACY_FLAT_FIELDS if f in raw_driver]
-    if found:
-        raise ConfigMigrationError(
-            f"Legacy config format detected (v1).\n"
-            f"Found legacy fields: {', '.join(sorted(found))}\n"
-            f"Please migrate your config to v2 format.\n"
-            f"Migration guide: ~/.cli-bridge/docs/config-migration-v2.md"
-        )
 
 
 def get_config_dir() -> Path:
@@ -80,68 +55,27 @@ def load_config(config_path: Path | None = None, auto_create: bool = True) -> Co
         try:
             with open(config_path, encoding="utf-8") as f:
                 data = json.load(f)
-            raw_driver = data.get("driver", {})
-            if isinstance(raw_driver, dict):
-                _check_for_legacy_config(raw_driver)
-            data, migrated = _migrate_legacy_driver_timeout(data)
-            if migrated:
-                _save_raw_config_data(data, config_path)
-                logger.info(
-                    f"Migrated config timeout to {DEFAULT_TIMEOUT}s for existing install: {config_path}"
-                )
             config = Config(**data)
             logger.info(f"Loaded config from {config_path}")
             return config
-        except ConfigMigrationError:
-            raise
         except (json.JSONDecodeError, ValidationError) as e:
             logger.warning(f"Invalid config file: {e}. Using defaults.")
     else:
         logger.info("No config file found. Creating default config.")
         config = Config()
         if auto_create:
-            # 创建默认配置文件（根据环境变量中可能的 mode 偏好生成对应格式）
-            _create_default_config(config_path, mode=config.driver.mode)
+            _create_default_config(config_path, backend=config.driver.backend, transport=config.driver.transport)
         return config
 
     return Config()
 
 
-def _migrate_legacy_driver_timeout(data: dict) -> tuple[dict, bool]:
-    """Migrate legacy default timeout to new default for upgraded users.
 
-    Rules:
-    - If `driver.timeout` is missing, set it to DEFAULT_TIMEOUT.
-    - If `driver.timeout` equals legacy default 300 (int or string), set to DEFAULT_TIMEOUT.
-    - Keep all other custom timeout values unchanged.
-    """
-    migrated = False
-    driver = data.get("driver")
-    if not isinstance(driver, dict):
-        return data, migrated
-
-    timeout = driver.get("timeout")
-    if timeout is None:
-        driver["timeout"] = DEFAULT_TIMEOUT
-        migrated = True
-    elif timeout == LEGACY_DEFAULT_TIMEOUT or timeout == str(LEGACY_DEFAULT_TIMEOUT):
-        driver["timeout"] = DEFAULT_TIMEOUT
-        migrated = True
-
-    return data, migrated
-
-
-def _save_raw_config_data(data: dict, config_path: Path) -> None:
-    """Persist raw config dictionary to disk."""
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
-
-def _build_iflow_driver_block(mode: str = "stdio") -> dict:
-    """Build the driver config block for iflow-based modes (cli/stdio/acp)."""
+def _build_iflow_driver_block(transport: str = "stdio") -> dict:
+    """Build the driver config block for iflow backend (cli/stdio/acp transport)."""
     return {
-        "mode": mode,
+        "backend": "iflow",
+        "transport": transport,
         "max_turns": 40,
         "timeout": DEFAULT_TIMEOUT,
         "workspace": str(Path.home() / ".cli-bridge" / "workspace"),
@@ -166,10 +100,11 @@ def _build_iflow_driver_block(mode: str = "stdio") -> dict:
     }
 
 
-def _build_claude_driver_block() -> dict:
-    """Build the driver config block for claude mode (no iflow fields)."""
+def _build_claude_driver_block(transport: str = "cli") -> dict:
+    """Build the driver config block for claude backend."""
     return {
-        "mode": "claude",
+        "backend": "claude",
+        "transport": transport,
         "max_turns": 40,
         "timeout": DEFAULT_TIMEOUT,
         "workspace": str(Path.home() / ".cli-bridge" / "workspace"),
@@ -182,19 +117,18 @@ def _build_claude_driver_block() -> dict:
     }
 
 
-def _create_default_config(config_path: Path, mode: str = "stdio") -> None:
-    """创建默认配置文件。
-
-    根据 mode 生成对应的后端配置块：
-    - mode == "claude": 仅包含 driver.claude，不含 driver.iflow
-    - 其他 (cli/stdio/acp): 仅包含 driver.iflow，不含 driver.claude
-    """
+def _create_default_config(
+    config_path: Path,
+    backend: str = "iflow",
+    transport: str = "stdio",
+) -> None:
+    """创建默认配置文件（backend/transport 格式）。"""
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if mode == "claude":
-        driver_block = _build_claude_driver_block()
+    if backend == "claude":
+        driver_block = _build_claude_driver_block(transport=transport)
     else:
-        driver_block = _build_iflow_driver_block(mode)
+        driver_block = _build_iflow_driver_block(transport=transport)
 
     default_config = {
         "driver": driver_block,

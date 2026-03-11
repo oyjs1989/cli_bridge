@@ -15,10 +15,15 @@ class BaseAdapter(ABC):
     # ----- Identity -----
 
     @property
-    @abstractmethod
-    def mode(self) -> str:
-        """Identifier for the active mode (e.g., 'cli', 'stdio', 'acp', 'claude')."""
-        ...
+    def inline_agents(self) -> bool:
+        """Whether AGENTS.md should be injected inline into each message.
+
+        Returns True for short-lived (cli) adapters where there is no
+        persistent session to carry the system context.  Long-lived adapters
+        (stdio, acp, claude) override this to False because the session
+        system_prompt already carries the agent context.
+        """
+        return True
 
     # ----- Core Chat -----
 

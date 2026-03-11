@@ -370,20 +370,20 @@ def save_config(config) -> None:
 # ============================================================================
 
 
-def init_workspace(workspace: Path, mode: str = "stdio") -> None:
+def init_workspace(workspace: Path, backend: str = "iflow") -> None:
     """初始化 workspace 目录，从模板目录复制文件。
 
     逻辑：
     - 如果 workspace 已存在 AGENTS.md 或 BOOT.md，说明已初始化，跳过模板复制
     - 只有全新的 workspace 才复制所有模板（包括 BOOTSTRAP.md）
-    - claude 模式不需要 .iflow/settings.json
+    - claude 后端不需要 .iflow/settings.json
     """
     # 展开波浪号路径
     workspace = Path(str(workspace).replace("~", str(Path.home())))
     workspace.mkdir(parents=True, exist_ok=True)
 
-    # 创建 .iflow 目录和 settings.json（仅 iflow 模式需要）
-    if mode in ("cli", "stdio", "acp"):
+    # 创建 .iflow 目录和 settings.json（仅 iflow 后端需要）
+    if backend == "iflow":
         iflow_dir = workspace / ".iflow"
         iflow_dir.mkdir(exist_ok=True)
 
@@ -648,7 +648,7 @@ def gateway_start(
 
     # 加载配置
     config = load_config()
-    _mode = config.driver.mode
+    _backend = config.driver.backend
 
     # 检查并启动 MCP 代理
     # 优先级：命令行参数 > 配置文件
@@ -658,7 +658,7 @@ def gateway_start(
         else (config.driver.iflow.mcp_proxy_auto_start if config.driver.iflow else False)
     )
 
-    if _mode != "claude" and should_start_mcp and config.driver.iflow and config.driver.iflow.mcp_proxy_enabled:
+    if _backend != "claude" and should_start_mcp and config.driver.iflow and config.driver.iflow.mcp_proxy_enabled:
         mcp_port = config.driver.iflow.mcp_proxy_port
         if not check_mcp_proxy_running(mcp_port):
             console.print(f"[cyan]正在启动 MCP 代理 (端口: {mcp_port})...[/cyan]")
@@ -670,8 +670,8 @@ def gateway_start(
             console.print(f"[green]{_OK_MARK}[/green] MCP 代理已在运行 (端口: {mcp_port})")
         console.print()
 
-    # 检查后端是否就绪（根据 mode 分发到对应的检查器）
-    _ready, _ready_msg = asyncio.run(check_backend_ready(_mode, config.driver))
+    # 检查后端是否就绪（根据 backend 分发到对应的检查器）
+    _ready, _ready_msg = asyncio.run(check_backend_ready(_backend, config.driver))
     if not _ready:
         console.print(f"[red]{_ready_msg}[/red]")
         raise typer.Exit(1)
@@ -680,7 +680,7 @@ def gateway_start(
     workspace = Path(config.get_workspace())
 
     # 初始化 workspace
-    init_workspace(workspace, mode=config.driver.mode)
+    init_workspace(workspace, backend=config.driver.backend)
 
     # 检查是否已运行
     pid_file = get_pid_file()
@@ -736,10 +736,10 @@ def gateway_run(
     print_banner()
 
     config = load_config()
-    _mode = config.driver.mode
+    _backend = config.driver.backend
 
-    # 检查后端是否就绪（根据 mode 分发到对应的检查器）
-    _ready, _ready_msg = asyncio.run(check_backend_ready(_mode, config.driver))
+    # 检查后端是否就绪（根据 backend 分发到对应的检查器）
+    _ready, _ready_msg = asyncio.run(check_backend_ready(_backend, config.driver))
     if not _ready:
         console.print(f"[red]{_ready_msg}[/red]")
         raise typer.Exit(1)
@@ -747,7 +747,7 @@ def gateway_run(
     workspace = Path(config.get_workspace())
 
     # 初始化 workspace
-    init_workspace(workspace, mode=_mode)
+    init_workspace(workspace, backend=config.driver.backend)
 
     enabled_channels = config.get_enabled_channels()
     if not enabled_channels:
@@ -902,13 +902,14 @@ async def _run_gateway(config, verbose: bool = False) -> None:
 
     workspace = config.get_workspace()
 
-    # 获取模式配置
-    mode = config.driver.mode
+    # 获取后端和传输配置
+    _backend = config.driver.backend
+    _transport = config.driver.transport
     acp_port = config.driver.iflow.acp_port if config.driver.iflow else 8090
 
     # ACP 模式：启动 iflow ACP 服务
     acp_process = None
-    if mode == "acp":
+    if _transport == "acp":
         console.print(f"[bold cyan]启动 ACP 服务 (端口: {acp_port})...[/bold cyan]")
         result = await _start_acp_server(acp_port)
         if result is not None:
@@ -925,10 +926,23 @@ async def _run_gateway(config, verbose: bool = False) -> None:
                 console.print(f"[green]{_OK_MARK}[/green] 复用现有 ACP 服务 (端口: {acp_port})")
             else:
                 console.print("[red]✗ ACP 服务启动失败，回退到 CLI 模式[/red]")
-                mode = "cli"
+                _transport = "cli"
 
     # 创建适配器
-    if mode == "claude":
+    if _backend == "claude" and _transport == "stdio":
+        from cli_bridge.engine.claude_stdio_adapter import ClaudeStdioAdapter
+
+        claude_cfg = config.driver.claude
+        adapter = ClaudeStdioAdapter(
+            claude_path=claude_cfg.claude_path,
+            model=claude_cfg.model,
+            workspace=Path(workspace) if workspace else None,
+            permission_mode=claude_cfg.permission_mode,
+            system_prompt=claude_cfg.system_prompt,
+            max_turns=config.driver.max_turns,
+            timeout=config.get_timeout(),
+        )
+    elif _backend == "claude":
         from cli_bridge.engine.claude_adapter import ClaudeAdapter
 
         claude_cfg = config.driver.claude
@@ -948,7 +962,7 @@ async def _run_gateway(config, verbose: bool = False) -> None:
             workspace=workspace if workspace else None,
             timeout=config.get_timeout(),
             thinking=iflow_cfg.thinking,
-            mode=mode,
+            transport=_transport,
             acp_port=iflow_cfg.acp_port,
             compression_trigger_tokens=iflow_cfg.compression_trigger_tokens,
             mcp_proxy_port=iflow_cfg.mcp_proxy_port,
@@ -1076,7 +1090,7 @@ async def _run_gateway(config, verbose: bool = False) -> None:
             console.print(f"[dim]  定时任务: {cron_status['jobs']} 个[/dim]")
 
         console.print("[dim]  心跳: 每 30 分钟[/dim]")
-        console.print(f"[dim]  模式: {mode.upper()}[/dim]")
+        console.print(f"[dim]  模式: {_backend.upper()}/{_transport.upper()}[/dim]")
         console.print("[dim]按 Ctrl+C 停止[/dim]")
 
         while True:
@@ -1110,10 +1124,10 @@ def status() -> None:
     config_path = get_config_path()
     pid_file = get_pid_file()
 
-    # 后端状态（根据模式分发到对应的检查器）
-    _status_mode = config.driver.mode
-    _backend_ready, _backend_msg = asyncio.run(check_backend_ready(_status_mode, config.driver))
-    if _status_mode == "claude":
+    # 后端状态（根据 backend 分发到对应的检查器）
+    _status_backend = config.driver.backend
+    _backend_ready, _backend_msg = asyncio.run(check_backend_ready(_status_backend, config.driver))
+    if _status_backend == "claude":
         console.print("[bold]Claude 状态:[/bold]")
         if _backend_ready:
             console.print("  claude CLI: [green]可用[/green]")
@@ -1147,7 +1161,7 @@ def status() -> None:
     console.print("[bold]配置信息:[/bold]")
     console.print(f"  Config: [cyan]{config_path}[/cyan]")
     console.print(f"  Workspace: [cyan]{config.get_workspace() or 'Not set'}[/cyan]")
-    console.print(f"  Mode: [cyan]{config.driver.mode}[/cyan]")
+    console.print(f"  Backend: [cyan]{config.driver.backend}[/cyan]  Transport: [cyan]{config.driver.transport}[/cyan]")
     console.print(f"  Model: [cyan]{config.get_model()}[/cyan]")
     if config.driver.iflow:
         console.print(f"  Thinking: [cyan]{'启用' if config.driver.iflow.thinking else '禁用'}[/cyan]")
@@ -1210,7 +1224,10 @@ def model(
         from cli_bridge.config.schema import DriverConfig
 
         config.driver = DriverConfig()
-    config.driver.model = name
+    if config.driver.backend == "claude" and config.driver.claude:
+        config.driver.claude.model = name
+    elif config.driver.iflow:
+        config.driver.iflow.model = name
     save_config(config)
 
     console.print(f"[green]{_OK_MARK}[/green] Model set to: [cyan]{name}[/cyan]")
