@@ -8,10 +8,11 @@
 
 import asyncio
 import json
-import logging
 import time
 import uuid
 from typing import Any, Dict, Optional, Set
+
+from loguru import logger
 
 from cli_bridge.bus.events import OutboundMessage
 from cli_bridge.bus.queue import MessageBus
@@ -43,8 +44,6 @@ except ImportError:
     AckMessage = None  # type: ignore
     ChatbotMessage = None  # type: ignore
 
-
-logger = logging.getLogger(__name__)
 
 # AI Card 状态常量
 class AICardStatus:

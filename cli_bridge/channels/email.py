@@ -7,7 +7,7 @@
 import asyncio
 import html
 import imaplib
-import logging
+from loguru import logger
 import re
 import smtplib
 import ssl
@@ -24,9 +24,6 @@ from cli_bridge.bus.queue import MessageBus
 from cli_bridge.channels.base import BaseChannel
 from cli_bridge.channels.manager import register_channel
 from cli_bridge.config.schema import EmailConfig
-
-
-logger = logging.getLogger(__name__)
 
 
 # IMAP 月份缩写 (英文)

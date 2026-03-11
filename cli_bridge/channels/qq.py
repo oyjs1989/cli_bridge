@@ -5,7 +5,7 @@
 """
 
 import asyncio
-import logging
+from loguru import logger
 from collections import deque
 from pathlib import Path
 from typing import Any, Optional, TYPE_CHECKING
@@ -28,9 +28,6 @@ except ImportError:
 
 if TYPE_CHECKING:
     from botpy.message import C2CMessage, GroupMessage
-
-
-logger = logging.getLogger(__name__)
 
 
 def _make_bot_class(channel: "QQChannel") -> Any:
@@ -193,7 +190,7 @@ class QQChannel(BaseChannel):
                 - content: 消息内容
                 - metadata: 包含 group_id(群聊) 或 openid(私聊)
         """
-        logger.warning(f"[{self.name}] [DEBUG] send() called - chat_id={msg.chat_id}, content_len={len(msg.content)}, metadata={msg.metadata}")
+        logger.debug(f"[{self.name}] send() called - chat_id={msg.chat_id}, content_len={len(msg.content)}, metadata={msg.metadata}")
         
         if not self._client:
             logger.warning(f"[{self.name}] QQ client not initialized")
@@ -208,7 +205,7 @@ class QQChannel(BaseChannel):
                 group_id = metadata.get("group_id")
                 msg_id = metadata.get("reply_to_id") or metadata.get("message_id")
                 
-                logger.warning(f"[{self.name}] [DEBUG] Group message - group_id={group_id}, msg_id={msg_id}, metadata keys={list(metadata.keys())}")
+                logger.debug(f"[{self.name}] Group message - group_id={group_id}, msg_id={msg_id}, metadata keys={list(metadata.keys())}")
                 
                 # 获取并递增 msg_seq（使用小整数）
                 # msg_seq 必须唯一且递增，不能循环重置，否则会被 QQ 服务器识别为重复消息
@@ -223,7 +220,7 @@ class QQChannel(BaseChannel):
                 
                 if self.config.markdown_support:
                     # Markdown 模式
-                    logger.warning(f"[{self.name}] [DEBUG] Sending group message to {group_id}, msg_id={msg_id}, msg_seq={msg_seq}, markdown=true")
+                    logger.debug(f"[{self.name}] Sending group message to {group_id}, msg_id={msg_id}, msg_seq={msg_seq}, markdown=true")
                     try:
                         # 构建 payload
                         payload = {
@@ -232,7 +229,7 @@ class QQChannel(BaseChannel):
                             "msg_seq": msg_seq,
                             "markdown": {"content": content}
                         }
-                        logger.warning(f"[{self.name}] [DEBUG] Payload: {payload}")
+                        logger.debug(f"[{self.name}] Payload: {payload}")
                         
                         # 使用底层 HTTP 客户端发送请求
                         from botpy.http import Route

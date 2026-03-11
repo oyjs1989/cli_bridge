@@ -4,19 +4,16 @@
 """
 
 import asyncio
-import logging
 from typing import Any, Optional
 
 import discord
+from loguru import logger
 
 from cli_bridge.bus.events import InboundMessage, OutboundMessage
 from cli_bridge.bus.queue import MessageBus
 from cli_bridge.channels.base import BaseChannel
 from cli_bridge.channels.manager import register_channel
 from cli_bridge.config.schema import DiscordConfig
-
-
-logger = logging.getLogger(__name__)
 
 
 # Discord 消息字符限制

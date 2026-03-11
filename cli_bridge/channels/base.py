@@ -3,15 +3,13 @@
 提供所有 Channel 的抽象基类，定义了统一的接口和通用功能。
 """
 
-import logging
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
+from loguru import logger
+
 from cli_bridge.bus.events import InboundMessage, OutboundMessage
 from cli_bridge.bus.queue import MessageBus
-
-
-logger = logging.getLogger(__name__)
 
 
 class BaseChannel(ABC):

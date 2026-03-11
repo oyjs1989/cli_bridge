@@ -6,7 +6,7 @@
 
 import asyncio
 import json
-import logging
+import logging  # kept for SDK logger silencing
 import os
 import re
 import threading
@@ -45,7 +45,7 @@ except ImportError:
     Emoji = None  # type: ignore
 
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 # Message type display mapping

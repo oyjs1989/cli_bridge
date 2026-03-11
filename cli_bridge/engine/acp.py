@@ -898,7 +898,7 @@ class ACPAdapter:
                             ts = timestamp.replace("Z", "+00:00")
                             dt = datetime.datetime.fromisoformat(ts.replace("+00:00", ""))
                             time_str = dt.strftime("%Y-%m-%d %H:%M:%S")
-                        except:
+                        except (ValueError, AttributeError):
                             pass
                     all_conversations.append(("user", time_str, content))
                 

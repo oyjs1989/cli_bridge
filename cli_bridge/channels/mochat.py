@@ -6,7 +6,7 @@
 
 import asyncio
 import json
-import logging
+from loguru import logger
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -38,9 +38,6 @@ try:
     MSGPACK_AVAILABLE = True
 except ImportError:
     MSGPACK_AVAILABLE = False
-
-
-logger = logging.getLogger(__name__)
 
 
 # 常量

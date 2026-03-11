@@ -127,13 +127,27 @@ class EmailConfig(BaseModel):
     imap_port: int = 993
     imap_username: str = ""
     imap_password: str = ""
+    imap_use_ssl: bool = True
+    """IMAP 是否使用 SSL 连接。"""
+    imap_mailbox: str = "INBOX"
+    """IMAP 邮箱文件夹。"""
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""
     smtp_password: str = ""
+    smtp_use_tls: bool = True
+    """SMTP 是否使用 STARTTLS。"""
     from_address: str = ""
     allow_from: list[str] = Field(default_factory=list)
     auto_reply_enabled: bool = True
+    poll_interval_seconds: int = 30
+    """IMAP 轮询间隔（秒）。"""
+    max_body_chars: int = 10000
+    """邮件正文最大字符数。"""
+    mark_seen: bool = True
+    """获取后是否标记为已读。"""
+    subject_prefix: str = "Re: "
+    """回复邮件主题前缀。"""
 
 
 class MochatConfig(BaseModel):
@@ -147,6 +161,10 @@ class MochatConfig(BaseModel):
     agent_user_id: str = ""
     sessions: list[str] = Field(default_factory=lambda: ["*"])
     panels: list[str] = Field(default_factory=lambda: ["*"])
+    reply_delay_mode: str = ""
+    """延迟回复模式。设为 'non-mention' 时，非 @ 消息会延迟发送。"""
+    reply_delay_ms: int = 120000
+    """延迟回复时间（毫秒），默认 120 秒。"""
 
 
 class ChannelsConfig(BaseModel):

@@ -6,8 +6,9 @@ Bridge 使用 @whiskeysockets/baileys 处理 WhatsApp Web 协议。
 
 import asyncio
 import json
-import logging
 from typing import Any, Optional
+
+from loguru import logger
 
 from cli_bridge.bus.events import OutboundMessage
 from cli_bridge.bus.queue import MessageBus
@@ -21,9 +22,6 @@ try:
 except ImportError:
     WEBSOCKETS_AVAILABLE = False
     websockets = None  # type: ignore
-
-
-logger = logging.getLogger(__name__)
 
 
 @register_channel("whatsapp")

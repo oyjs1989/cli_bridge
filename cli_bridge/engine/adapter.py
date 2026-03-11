@@ -227,7 +227,7 @@ class IFlowAdapter:
                         first_msg = first.get("timestamp")
                         last = json.loads(lines[-1])
                         last_msg = last.get("timestamp")
-                    except:
+                    except (json.JSONDecodeError, IndexError, KeyError):
                         pass
                 
                 sessions.append({
@@ -598,7 +598,7 @@ class IFlowAdapter:
                 try:
                     process.kill()
                     await process.wait()
-                except:
+                except OSError:
                     pass
         self._running_processes.clear()
         
@@ -645,5 +645,5 @@ class IFlowAdapter:
                     )
                 await asyncio.wait_for(process.wait(), timeout=10)
                 return process.returncode == 0
-            except:
+            except (OSError, asyncio.TimeoutError):
                 return False
