@@ -406,7 +406,7 @@ class ConsoleService:
             try:
                 # 从配置获取端口
                 cfg = self.get_config_obj()
-                port = cfg.driver.mcp_proxy_port if cfg.driver else 8888
+                port = cfg.mcp_proxy.port if cfg.mcp_proxy else 8888
 
                 async def fetch_health():
                     async with aiohttp.ClientSession() as session:
@@ -1761,7 +1761,7 @@ def create_app(token: str | None = None) -> FastAPI:
         )
 
         cfg = service.get_config_obj()
-        port = cfg.driver.mcp_proxy_port if cfg.driver else 8888
+        port = cfg.mcp_proxy.port if cfg.mcp_proxy else 8888
 
         try:
             # 先检查是否已经在运行

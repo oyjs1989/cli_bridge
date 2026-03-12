@@ -1213,9 +1213,10 @@ def status() -> None:
     console.print(f"  Workspace: [cyan]{config.get_workspace() or 'Not set'}[/cyan]")
     console.print(f"  Backend: [cyan]{config.driver.backend}[/cyan]  Transport: [cyan]{config.driver.transport}[/cyan]")
     console.print(f"  Model: [cyan]{config.get_model()}[/cyan]")
+    _mcp_status = config.mcp_proxy.enabled or (config.driver.iflow and config.driver.iflow.mcp_proxy_enabled)
+    console.print(f"  MCP Proxy: [cyan]{'启用' if _mcp_status else '禁用'}[/cyan]")
     if config.driver.iflow:
         console.print(f"  Thinking: [cyan]{'启用' if config.driver.iflow.thinking else '禁用'}[/cyan]")
-        console.print(f"  MCP Proxy: [cyan]{'启用' if config.driver.iflow.mcp_proxy_enabled else '禁用'}[/cyan]")
     elif config.driver.claude:
         console.print(f"  Permission Mode: [cyan]{config.driver.claude.permission_mode}[/cyan]")
     console.print()
@@ -1305,7 +1306,10 @@ def thinking(
         from cli_bridge.config.schema import DriverConfig
 
         config.driver = DriverConfig()
-    config.driver.thinking = enabled
+    if config.driver.iflow is None:
+        from cli_bridge.config.schema import IFlowBackendConfig
+        config.driver.iflow = IFlowBackendConfig()
+    config.driver.iflow.thinking = enabled
     save_config(config)
 
     status = "启用" if enabled else "禁用"
@@ -1400,7 +1404,7 @@ def config_cmd(
         cfg = load_config()
         console.print(f"Model: [cyan]{cfg.get_model()}[/cyan]")
         console.print(f"Workspace: [cyan]{cfg.get_workspace() or 'Not set'}[/cyan]")
-        thinking = cfg.driver.thinking if hasattr(cfg, "driver") and cfg.driver else False
+        thinking = cfg.driver.iflow.thinking if cfg.driver and cfg.driver.iflow else False
         console.print(f"Thinking: [cyan]{'启用' if thinking else '禁用'}[/cyan]")
 
 
