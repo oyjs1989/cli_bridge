@@ -20,25 +20,24 @@ BOOTSTRAP 引导机制：
 from __future__ import annotations
 
 import asyncio
-import random
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from cli_bridge.bus import InboundMessage, MessageBus, OutboundMessage
+from cli_bridge.engine._streaming import (
+    STREAMING_CHANNELS,
+    analyze_and_build_outbound,
+    process_with_streaming,
+)
 from cli_bridge.engine.adapter import IFlowAdapter
-from cli_bridge.engine.analyzer import result_analyzer
+
+# Streaming output buffer size range (characters) — kept here so tests can monkeypatch them
+STREAM_BUFFER_MIN = 10
+STREAM_BUFFER_MAX = 25
 
 if TYPE_CHECKING:
     from cli_bridge.channels.manager import ChannelManager
-
-
-# 支持流式输出的渠道列表
-STREAMING_CHANNELS = {"telegram", "discord", "slack", "dingtalk", "qq", "feishu"}
-
-# 流式输出缓冲区大小范围（字符数）
-STREAM_BUFFER_MIN = 10
-STREAM_BUFFER_MAX = 25
 
 
 class AgentLoop:
@@ -163,58 +162,6 @@ time: {now}
 
         return context
 
-    def _analyze_and_build_outbound(
-        self,
-        response: str,
-        channel: str,
-        chat_id: str,
-        metadata: dict | None = None,
-    ) -> OutboundMessage:
-        """Analyze response with ResultAnalyzer and build OutboundMessage with media.
-
-        Ported from feishu-iflow-bridge FeishuSender.sendExecutionResult():
-        - Scans iflow output for generated file paths
-        - Categorizes files (image/audio/video/doc)
-        - Attaches detected files via OutboundMessage.media
-
-        Args:
-            response: Raw response text from iflow
-            channel: Target channel name
-            chat_id: Target chat ID
-            metadata: Additional metadata
-
-        Returns:
-            OutboundMessage with content and media attachments
-        """
-        # Analyze the response
-        analysis = result_analyzer.analyze({"output": response, "success": True})
-
-        # Collect all detected files for media attachment
-        media_files: list[str] = []
-        if analysis.image_files:
-            media_files.extend(analysis.image_files)
-            logger.info(f"Detected {len(analysis.image_files)} image(s) in response")
-        if analysis.audio_files:
-            media_files.extend(analysis.audio_files)
-            logger.info(f"Detected {len(analysis.audio_files)} audio file(s) in response")
-        if analysis.video_files:
-            media_files.extend(analysis.video_files)
-            logger.info(f"Detected {len(analysis.video_files)} video file(s) in response")
-        if analysis.doc_files:
-            media_files.extend(analysis.doc_files)
-            logger.info(f"Detected {len(analysis.doc_files)} document(s) in response")
-
-        if media_files:
-            logger.info(f"File callback: attaching {len(media_files)} file(s) to outbound message")
-
-        return OutboundMessage(
-            channel=channel,
-            chat_id=chat_id,
-            content=response,
-            media=media_files,
-            metadata=metadata or {},
-        )
-
     async def run(self) -> None:
         """启动主循环。"""
         self._running = True
@@ -315,7 +262,7 @@ time: {now}
                 # 发送最终响应（如果有内容且不是流式模式）
                 if response and not supports_streaming:
                     # 🆕 使用 ResultAnalyzer 分析响应并提取文件
-                    outbound = self._analyze_and_build_outbound(
+                    outbound = analyze_and_build_outbound(
                         response=response,
                         channel=msg.channel,
                         chat_id=msg.chat_id,
@@ -339,295 +286,18 @@ time: {now}
         msg: InboundMessage,
         message_content: str,
     ) -> str:
-        """
-        流式处理消息并发送实时更新到渠道。
-
-        使用内容缓冲机制，每满 N 个字符推送一次（随机范围）。
-
-        Args:
-            msg: 入站消息
-            message_content: 准备好的消息内容
-
-        Returns:
-            最终响应文本
-        """
-        session_key = f"{msg.channel}:{msg.chat_id}"
-
-        # 初始化缓冲区
-        self._stream_buffers[session_key] = ""
-
-        # 未发送的字符计数和当前阈值
-        unflushed_count = 0
-        current_threshold = random.randint(STREAM_BUFFER_MIN, STREAM_BUFFER_MAX)
-
-        # 钉钉使用直接调用方式（AI Card）
-        dingtalk_channel = None
-        if msg.channel == "dingtalk" and self.channel_manager:
-            dingtalk_channel = self.channel_manager.get_channel("dingtalk")
-            # 立即创建 AI Card，实现秒回卡片
-            if dingtalk_channel and hasattr(dingtalk_channel, "start_streaming"):
-                await dingtalk_channel.start_streaming(msg.chat_id)
-            dingtalk_channel = self.channel_manager.get_channel("dingtalk")
-
-        # QQ 使用直接调用方式（流式分段发送）
-        qq_channel = None
-        qq_segment_buffer = ""  # 当前正在累积的段内容
-        qq_line_buffer = ""  # 还没收到 \n 的不完整行（用于正确检测 ```）
-        qq_newline_count = 0
-        qq_in_code_block = False  # 是否在代码块内（代码块内换行符不计入阈值）
-        if msg.channel == "qq" and self.channel_manager:
-            qq_channel = self.channel_manager.get_channel("qq")
-
-        async def on_chunk(channel: str, chat_id: str, chunk_text: str):
-            """处理流式消息块。"""
-            nonlocal \
-                unflushed_count, \
-                current_threshold, \
-                qq_segment_buffer, \
-                qq_line_buffer, \
-                qq_newline_count, \
-                qq_in_code_block
-
-            key = f"{channel}:{chat_id}"
-
-            # 更新累积缓冲区（所有渠道，用于记录完整内容与日志）
-            self._stream_buffers[key] = self._stream_buffers.get(key, "") + chunk_text
-
-            # QQ 渠道：按换行符分段直接发送，不走字符缓冲逻辑
-            if channel == "qq" and qq_channel:
-                threshold = getattr(qq_channel.config, "split_threshold", 0)
-                if threshold > 0:
-                    qq_line_buffer += chunk_text
-                    while "\n" in qq_line_buffer:
-                        idx = qq_line_buffer.index("\n")
-                        complete_line = qq_line_buffer[:idx]
-
-                        qq_line_buffer = qq_line_buffer[idx + 1 :]
-
-                        # 检测代码块分隔符
-                        if complete_line.strip().startswith("```"):
-                            qq_in_code_block = not qq_in_code_block
-
-                        # 将完整行加入当前段
-                        qq_segment_buffer += complete_line + "\n"
-
-                        # 代码块内的换行符不计入阈值
-                        if not qq_in_code_block:
-                            qq_newline_count += 1
-                            if qq_newline_count >= threshold:
-                                segment = qq_segment_buffer.strip()
-                                qq_segment_buffer = ""
-                                qq_newline_count = 0
-                                if segment:
-                                    await qq_channel.send(
-                                        OutboundMessage(
-                                            channel=channel,
-                                            chat_id=chat_id,
-                                            content=segment,
-                                            metadata={
-                                                "reply_to_id": msg.metadata.get("message_id")
-                                            },
-                                        )
-                                    )
-                                    from cli_bridge.session.recorder import get_recorder
-
-                                    recorder = get_recorder()
-                                    if recorder:
-                                        recorder.record_outbound(
-                                            OutboundMessage(
-                                                channel=channel,
-                                                chat_id=chat_id,
-                                                content=segment,
-                                                metadata={
-                                                    "reply_to_id": msg.metadata.get("message_id")
-                                                },
-                                            )
-                                        )
-                return  # 不走字符缓冲逻辑
-
-            unflushed_count += len(chunk_text)
-
-            # 当累积足够字符时发送更新
-            if unflushed_count >= current_threshold:
-                unflushed_count = 0
-                current_threshold = random.randint(STREAM_BUFFER_MIN, STREAM_BUFFER_MAX)
-
-                # 钉钉：直接调用渠道的流式方法
-                if (
-                    channel == "dingtalk"
-                    and dingtalk_channel
-                    and hasattr(dingtalk_channel, "handle_streaming_chunk")
-                ):
-                    await dingtalk_channel.handle_streaming_chunk(
-                        chat_id, self._stream_buffers[key], is_final=False
-                    )
-                else:
-                    # 其他渠道：通过消息总线
-                    await self.bus.publish_outbound(
-                        OutboundMessage(
-                            channel=channel,
-                            chat_id=chat_id,
-                            content=self._stream_buffers[key],
-                            metadata={
-                                "_progress": True,
-                                "_streaming": True,
-                                "reply_to_id": msg.metadata.get("message_id"),
-                            },
-                        )
-                    )
-
-        async def on_tool_call(channel: str, chat_id: str, tool_name: str) -> None:
-            """工具调用进度提示 — 注入到流式缓冲，让用户在等待时看到 Claude 在做什么。"""
-            await on_chunk(channel, chat_id, f"\n> 🔧 *{tool_name}*\n")
-
-        try:
-            # 使用流式 chat
-            response = await self.adapter.chat_stream(
-                message=message_content,
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                model=self.model,
-                on_chunk=on_chunk,
-                on_tool_call=on_tool_call,
-            )
-
-            # 清理缓冲区
-            final_content = self._stream_buffers.pop(session_key, "")
-
-            # 优先使用 adapter 返回的干净最终文本（claude result 事件）；
-            # 流式缓冲 final_content 可能混有工具调用提示行，仅用于中间预览。
-            display_final = response.strip() if response and response.strip() else final_content
-
-            # QQ 渠道：发送遗留的buffer
-            if msg.channel == "qq" and qq_channel:
-                threshold = getattr(qq_channel.config, "split_threshold", 0)
-                from cli_bridge.session.recorder import get_recorder
-
-                recorder = get_recorder()
-                if threshold <= 0:
-                    content_to_send = final_content.strip()
-                    if content_to_send:
-                        await qq_channel.send(
-                            OutboundMessage(
-                                channel=msg.channel,
-                                chat_id=msg.chat_id,
-                                content=content_to_send,
-                                metadata={"reply_to_id": msg.metadata.get("message_id")},
-                            )
-                        )
-                        if recorder:
-                            recorder.record_outbound(
-                                OutboundMessage(
-                                    channel=msg.channel,
-                                    chat_id=msg.chat_id,
-                                    content=content_to_send,
-                                    metadata={"reply_to_id": msg.metadata.get("message_id")},
-                                )
-                            )
-                else:
-                    remainder_to_send = (qq_segment_buffer + qq_line_buffer).strip()
-                    if remainder_to_send:
-                        await qq_channel.send(
-                            OutboundMessage(
-                                channel=msg.channel,
-                                chat_id=msg.chat_id,
-                                content=remainder_to_send,
-                                metadata={"reply_to_id": msg.metadata.get("message_id")},
-                            )
-                        )
-                        if recorder:
-                            recorder.record_outbound(
-                                OutboundMessage(
-                                    channel=msg.channel,
-                                    chat_id=msg.chat_id,
-                                    content=remainder_to_send,
-                                    metadata={"reply_to_id": msg.metadata.get("message_id")},
-                                )
-                            )
-
-            if display_final:
-                # 🆕 流式结束后，也用 ResultAnalyzer 分析并附加检测到的文件
-                analysis = result_analyzer.analyze({"output": display_final, "success": True})
-                media_files = (
-                    analysis.image_files
-                    + analysis.audio_files
-                    + analysis.video_files
-                    + analysis.doc_files
-                )
-
-                if media_files:
-                    logger.info(
-                        f"Stream completed: detected {len(media_files)} file(s) for callback"
-                    )
-
-                # 钉钉：直接调用最终更新
-                if (
-                    msg.channel == "dingtalk"
-                    and dingtalk_channel
-                    and hasattr(dingtalk_channel, "handle_streaming_chunk")
-                ):
-                    await dingtalk_channel.handle_streaming_chunk(
-                        msg.chat_id, display_final, is_final=True
-                    )
-                    # 钉钉流式结束后，单独发送检测到的文件
-                    if media_files:
-                        await self.bus.publish_outbound(
-                            OutboundMessage(
-                                channel=msg.channel,
-                                chat_id=msg.chat_id,
-                                content="",
-                                media=media_files,
-                            )
-                        )
-                elif msg.channel != "qq":
-                    # 其他渠道（非 QQ、非钉钉）：通过消息总线
-                    await self.bus.publish_outbound(
-                        OutboundMessage(
-                            channel=msg.channel,
-                            chat_id=msg.chat_id,
-                            content=display_final,
-                            media=media_files,
-                            metadata={
-                                "_progress": True,
-                                "_streaming": True,
-                                "reply_to_id": msg.metadata.get("message_id"),
-                            },
-                        )
-                    )
-                    # 再发送流式结束标记
-                    await self.bus.publish_outbound(
-                        OutboundMessage(
-                            channel=msg.channel,
-                            chat_id=msg.chat_id,
-                            content="",
-                            metadata={
-                                "_streaming_end": True,
-                                "reply_to_id": msg.metadata.get("message_id"),
-                            },
-                        )
-                    )
-                logger.info(f"Streaming response completed for {msg.channel}:{msg.chat_id}")
-            else:
-                fallback = (
-                    "⚠️ 本轮未产出可见文本（可能会话上下文过长）。"
-                    "我已自动尝试恢复，如仍失败请发送 /new 开启新会话。"
-                )
-                await self.bus.publish_outbound(
-                    OutboundMessage(
-                        channel=msg.channel,
-                        chat_id=msg.chat_id,
-                        content=fallback,
-                        metadata={"reply_to_id": msg.metadata.get("message_id")},
-                    )
-                )
-                logger.warning(f"Streaming produced empty output for {msg.channel}:{msg.chat_id}")
-
-            return display_final
-
-        except Exception as e:
-            # 清理缓冲区
-            self._stream_buffers.pop(session_key, None)
-            raise e
+        """流式处理消息 — delegates to _streaming.process_with_streaming."""
+        return await process_with_streaming(
+            adapter=self.adapter,
+            bus=self.bus,
+            msg=msg,
+            message_content=message_content,
+            model=self.model,
+            channel_manager=self.channel_manager,
+            stream_buffers=self._stream_buffers,
+            buffer_min=STREAM_BUFFER_MIN,
+            buffer_max=STREAM_BUFFER_MAX,
+        )
 
     async def process_direct(
         self,
