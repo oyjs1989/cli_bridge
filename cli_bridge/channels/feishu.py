@@ -12,10 +12,11 @@ import re
 import threading
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from cli_bridge.bus.events import OutboundMessage
 from cli_bridge.bus.queue import MessageBus
+from cli_bridge.channels._streaming_mixin import StreamingMixin
 from cli_bridge.channels.base import BaseChannel
 from cli_bridge.channels.manager import register_channel
 from cli_bridge.config.schema import FeishuConfig
@@ -27,16 +28,16 @@ try:
         CreateFileRequestBody,
         CreateImageRequest,
         CreateImageRequestBody,
-        DeleteMessageReactionRequest,
-        CreateMessageRequest,
-        CreateMessageRequestBody,
         CreateMessageReactionRequest,
         CreateMessageReactionRequestBody,
+        CreateMessageRequest,
+        CreateMessageRequestBody,
+        DeleteMessageReactionRequest,
         Emoji,
         GetMessageResourceRequest,
+        P2ImMessageReceiveV1,
         PatchMessageRequest,
         PatchMessageRequestBody,
-        P2ImMessageReceiveV1,
     )
     FEISHU_AVAILABLE = True
 except ImportError:
@@ -46,7 +47,6 @@ except ImportError:
 
 
 from loguru import logger
-
 
 # Message type display mapping
 MSG_TYPE_MAP = {
@@ -292,7 +292,7 @@ def _extract_post_parts(content_json: dict) -> tuple[list[str], list[dict[str, A
 
 
 @register_channel("feishu")
-class FeishuChannel(BaseChannel):
+class FeishuChannel(StreamingMixin, BaseChannel):
     """Feishu/Lark channel using WebSocket long connection.
 
     Uses WebSocket to receive events - no public IP or webhook required.
@@ -326,10 +326,10 @@ class FeishuChannel(BaseChannel):
         self.config: FeishuConfig = config
         self._client: Any = None
         self._ws_client: Any = None
-        self._ws_loop: Optional[asyncio.AbstractEventLoop] = None
-        self._ws_thread: Optional[threading.Thread] = None
+        self._ws_loop: asyncio.AbstractEventLoop | None = None
+        self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._streaming_message_ids: dict[str, str] = {}
         self._streaming_last_content: dict[str, str] = {}
         self._typing_reaction_ids: dict[str, str] = {}
@@ -378,9 +378,10 @@ class FeishuChannel(BaseChannel):
 
         # Start WebSocket client in a separate thread with reconnect loop
         def run_ws() -> None:
-            import time
             import asyncio
             import ssl as _ssl
+            import time
+
             import websockets
             import websockets.asyncio.client as _ws_asyncio_client
 
@@ -450,7 +451,7 @@ class FeishuChannel(BaseChannel):
     _CODE_BLOCK_RE = re.compile(r"(```[\s\S]*?```)", re.MULTILINE)
 
     @staticmethod
-    def _parse_md_table(table_text: str) -> Optional[dict]:
+    def _parse_md_table(table_text: str) -> dict | None:
         """Parse a markdown table into a Feishu table element."""
         lines = [l.strip() for l in table_text.strip().split("\n") if l.strip()]
         if len(lines) < 3:
@@ -540,7 +541,7 @@ class FeishuChannel(BaseChannel):
         ".xls": "xls", ".xlsx": "xls", ".ppt": "ppt", ".pptx": "ppt",
     }
 
-    def _upload_image_sync(self, file_path: str) -> Optional[str]:
+    def _upload_image_sync(self, file_path: str) -> str | None:
         """Upload an image to Feishu and return the image_key."""
         try:
             with open(file_path, "rb") as f:
@@ -563,7 +564,7 @@ class FeishuChannel(BaseChannel):
             logger.error(f"Error uploading image {file_path}: {e}")
             return None
 
-    def _upload_file_sync(self, file_path: str) -> Optional[str]:
+    def _upload_file_sync(self, file_path: str) -> str | None:
         """Upload a file to Feishu and return the file_key."""
         ext = os.path.splitext(file_path)[1].lower()
         file_type = self._FILE_TYPE_MAP.get(ext, "stream")
@@ -590,7 +591,7 @@ class FeishuChannel(BaseChannel):
             logger.error(f"Error uploading file {file_path}: {e}")
             return None
 
-    def _download_image_sync(self, message_id: str, image_key: str) -> tuple[Optional[bytes], Optional[str]]:
+    def _download_image_sync(self, message_id: str, image_key: str) -> tuple[bytes | None, str | None]:
         """Download an image from Feishu message."""
         try:
             request = GetMessageResourceRequest.builder() \
@@ -613,7 +614,7 @@ class FeishuChannel(BaseChannel):
 
     def _download_file_sync(
         self, message_id: str, file_key: str, resource_type: str = "file"
-    ) -> tuple[Optional[bytes], Optional[str]]:
+    ) -> tuple[bytes | None, str | None]:
         """Download a file/audio/media from a Feishu message."""
         try:
             request = GetMessageResourceRequest.builder() \
@@ -638,8 +639,8 @@ class FeishuChannel(BaseChannel):
         self,
         msg_type: str,
         content_json: dict,
-        message_id: Optional[str] = None
-    ) -> tuple[Optional[str], str]:
+        message_id: str | None = None
+    ) -> tuple[str | None, str]:
         """Download media from Feishu and save to local disk.
 
         Args:
@@ -654,8 +655,8 @@ class FeishuChannel(BaseChannel):
         media_dir = Path.home() / ".cli-bridge" / "media"
         media_dir.mkdir(parents=True, exist_ok=True)
 
-        data: Optional[bytes] = None
-        filename: Optional[str] = None
+        data: bytes | None = None
+        filename: str | None = None
 
         if msg_type == "image":
             image_key = content_json.get("image_key")
@@ -686,7 +687,7 @@ class FeishuChannel(BaseChannel):
 
     def _send_message_sync(
         self, receive_id_type: str, receive_id: str, msg_type: str, content: str
-    ) -> Optional[str]:
+    ) -> str | None:
         """Send a single message (text/image/file/interactive) synchronously."""
         try:
             request = CreateMessageRequest.builder() \
@@ -742,7 +743,7 @@ class FeishuChannel(BaseChannel):
             return False
 
     async def _send_text_fallback(
-        self, receive_id_type: str, receive_id: str, content: str, stream_key: Optional[str] = None
+        self, receive_id_type: str, receive_id: str, content: str, stream_key: str | None = None
     ) -> bool:
         """Fallback to plain text when streaming card delivery fails."""
         if not content.strip():
@@ -866,7 +867,7 @@ class FeishuChannel(BaseChannel):
         )
         await self._send_text_fallback(receive_id_type, msg.chat_id, content, stream_key=stream_key)
 
-    def _add_reaction_sync(self, message_id: str, emoji_type: str) -> Optional[str]:
+    def _add_reaction_sync(self, message_id: str, emoji_type: str) -> str | None:
         """Sync helper for adding reaction (runs in thread pool)."""
         try:
             request = CreateMessageReactionRequest.builder() \
@@ -914,7 +915,7 @@ class FeishuChannel(BaseChannel):
             logger.warning(f"Error deleting reaction: {e}")
             return False
 
-    async def _add_reaction(self, message_id: str, emoji_type: str = "THUMBSUP") -> Optional[str]:
+    async def _add_reaction(self, message_id: str, emoji_type: str = "THUMBSUP") -> str | None:
         """Add a reaction emoji to a message (non-blocking).
 
         Common emoji types: THUMBSUP, OK, EYES, DONE, OnIt, HEART

@@ -4,7 +4,7 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any
 
 from loguru import logger
 
@@ -86,11 +86,11 @@ class BaseChannel(ABC):
             是否有权限
         """
         allow_list = getattr(self.config, "allow_from", [])
-        
+
         # 如果没有配置白名单，允许所有
         if not allow_list:
             return True
-        
+
         sender_str = str(sender_id)
         # 先直接比较完整 sender_id
         if sender_str in allow_list:
@@ -107,8 +107,8 @@ class BaseChannel(ABC):
         sender_id: str,
         chat_id: str,
         content: str,
-        media: Optional[list[str]] = None,
-        metadata: Optional[dict[str, Any]] = None,
+        media: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """处理入站消息，发布到消息总线。
 

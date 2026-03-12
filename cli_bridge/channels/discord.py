@@ -4,24 +4,24 @@
 """
 
 import asyncio
-from typing import Any, Optional
+from typing import Any
 
 import discord
 from loguru import logger
 
-from cli_bridge.bus.events import InboundMessage, OutboundMessage
+from cli_bridge.bus.events import OutboundMessage
 from cli_bridge.bus.queue import MessageBus
+from cli_bridge.channels._streaming_mixin import StreamingMixin
 from cli_bridge.channels.base import BaseChannel
 from cli_bridge.channels.manager import register_channel
 from cli_bridge.config.schema import DiscordConfig
-
 
 # Discord 消息字符限制
 DISCORD_MAX_MESSAGE_LENGTH = 2000
 
 
 @register_channel("discord")
-class DiscordChannel(BaseChannel):
+class DiscordChannel(StreamingMixin, BaseChannel):
     """Discord Channel 实现。
 
     使用 discord.py 库连接 Discord Gateway，支持：
@@ -47,7 +47,7 @@ class DiscordChannel(BaseChannel):
             bus: 消息总线实例
         """
         super().__init__(config, bus)
-        self.client: Optional[discord.Client] = None
+        self.client: discord.Client | None = None
         self._ready_event = asyncio.Event()
         self._streaming_messages: dict[str, discord.Message] = {}
         self._streaming_last_content: dict[str, str] = {}
@@ -171,7 +171,7 @@ class DiscordChannel(BaseChannel):
                 return
             await self._handle_streaming_message(target, msg)
             return
-        
+
         # Discord 不允许发送空消息；流式结束包等可能出现空内容
         content = (msg.content or "").strip()
         has_embed = isinstance(msg.metadata.get("embed"), dict)
@@ -245,7 +245,7 @@ class DiscordChannel(BaseChannel):
 
     async def _get_send_target(
         self, chat_id: str, metadata: dict[str, Any]
-    ) -> Optional[discord.abc.Messageable]:
+    ) -> discord.abc.Messageable | None:
         """获取消息发送目标。
 
         根据 chat_id 和 metadata 判断发送目标类型：
@@ -311,7 +311,7 @@ class DiscordChannel(BaseChannel):
 
         return None
 
-    def _build_embed(self, metadata: dict[str, Any]) -> Optional[discord.Embed]:
+    def _build_embed(self, metadata: dict[str, Any]) -> discord.Embed | None:
         """构建 Discord Embed 对象。
 
         从 metadata 中提取 embed 配置并构建 Embed 对象。

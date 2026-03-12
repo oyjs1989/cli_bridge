@@ -7,7 +7,6 @@
 import asyncio
 import html
 import imaplib
-from loguru import logger
 import re
 import smtplib
 import ssl
@@ -17,14 +16,15 @@ from email.header import decode_header, make_header
 from email.message import EmailMessage
 from email.parser import BytesParser
 from email.utils import parseaddr
-from typing import Any, List, Optional, Set
+from typing import Any
+
+from loguru import logger
 
 from cli_bridge.bus.events import OutboundMessage
 from cli_bridge.bus.queue import MessageBus
 from cli_bridge.channels.base import BaseChannel
 from cli_bridge.channels.manager import register_channel
 from cli_bridge.config.schema import EmailConfig
-
 
 # IMAP 月份缩写 (英文)
 _IMAP_MONTHS = (
@@ -81,7 +81,7 @@ class EmailChannel(BaseChannel):
         self.config: EmailConfig = config
         self._last_subject_by_chat: dict[str, str] = {}
         self._last_message_id_by_chat: dict[str, str] = {}
-        self._processed_uids: Set[str] = set()
+        self._processed_uids: set[str] = set()
 
     async def start(self) -> None:
         """启动 IMAP 轮询。"""
@@ -241,7 +241,7 @@ class EmailChannel(BaseChannel):
             smtp.login(self.config.smtp_username, self.config.smtp_password)
             smtp.send_message(msg)
 
-    def _fetch_new_messages(self) -> List[dict[str, Any]]:
+    def _fetch_new_messages(self) -> list[dict[str, Any]]:
         """轮询 IMAP 获取未读消息。"""
         return self._fetch_messages(
             search_criteria=("UNSEEN",),
@@ -255,7 +255,7 @@ class EmailChannel(BaseChannel):
         start_date: date,
         end_date: date,
         limit: int = 20,
-    ) -> List[dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """获取指定日期范围内的消息 (用于历史摘要)。
 
         Args:
@@ -287,9 +287,9 @@ class EmailChannel(BaseChannel):
         mark_seen: bool,
         dedupe: bool,
         limit: int,
-    ) -> List[dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """根据 IMAP 搜索条件获取消息。"""
-        messages: List[dict[str, Any]] = []
+        messages: list[dict[str, Any]] = []
         mailbox = getattr(self.config, 'imap_mailbox', self.IMAP_MAILBOX)
         use_ssl = getattr(self.config, 'imap_use_ssl', True)
 
@@ -400,7 +400,7 @@ class EmailChannel(BaseChannel):
         return f"{value.day:02d}-{month}-{value.year}"
 
     @staticmethod
-    def _extract_message_bytes(fetched: List[Any]) -> Optional[bytes]:
+    def _extract_message_bytes(fetched: list[Any]) -> bytes | None:
         """从 IMAP 获取结果中提取消息字节。"""
         for item in fetched:
             if isinstance(item, tuple) and len(item) >= 2:
@@ -409,7 +409,7 @@ class EmailChannel(BaseChannel):
         return None
 
     @staticmethod
-    def _extract_uid(fetched: List[Any]) -> str:
+    def _extract_uid(fetched: list[Any]) -> str:
         """从 IMAP 获取结果中提取 UID。"""
         for item in fetched:
             if isinstance(item, tuple) and item:
@@ -434,8 +434,8 @@ class EmailChannel(BaseChannel):
     def _extract_text_body(cls, msg: Any) -> str:
         """提取邮件正文文本 (尽力而为)。"""
         if msg.is_multipart():
-            plain_parts: List[str] = []
-            html_parts: List[str] = []
+            plain_parts: list[str] = []
+            html_parts: list[str] = []
 
             for part in msg.walk():
                 if part.get_content_disposition() == "attachment":

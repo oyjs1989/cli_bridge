@@ -5,10 +5,11 @@
 """
 
 import asyncio
-from loguru import logger
 from collections import deque
 from pathlib import Path
-from typing import Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from loguru import logger
 
 from cli_bridge.bus.events import OutboundMessage
 from cli_bridge.bus.queue import MessageBus
@@ -133,10 +134,10 @@ class QQChannel(BaseChannel):
                 await self._client.close()
             except Exception:
                 pass
-        
+
         # 保存 msg_seq 状态
         await self._save_msg_seq_state()
-        
+
         logger.info(f"[{self.name}] QQ bot stopped")
 
     async def _load_msg_seq_state(self):
@@ -145,7 +146,7 @@ class QQChannel(BaseChannel):
         try:
             if state_file.exists():
                 import json
-                with open(state_file, 'r', encoding='utf-8') as f:
+                with open(state_file, encoding='utf-8') as f:
                     loaded_data = json.load(f)
 
                 # 迁移旧格式：如果加载的数据是纯数字字典，转换为新格式
@@ -168,7 +169,7 @@ class QQChannel(BaseChannel):
         except Exception as e:
             logger.warning(f"[{self.name}] Failed to load msg_seq state: {e}")
             self._group_msg_seq = {}
-    
+
     async def _save_msg_seq_state(self):
         """保存 msg_seq 计数器状态到文件"""
         state_file = Path.home() / ".cli-bridge" / "qq_msg_seq_state.json"
@@ -191,7 +192,7 @@ class QQChannel(BaseChannel):
                 - metadata: 包含 group_id(群聊) 或 openid(私聊)
         """
         logger.debug(f"[{self.name}] send() called - chat_id={msg.chat_id}, content_len={len(msg.content)}, metadata={msg.metadata}")
-        
+
         if not self._client:
             logger.warning(f"[{self.name}] QQ client not initialized")
             return
@@ -204,9 +205,9 @@ class QQChannel(BaseChannel):
                 # 群聊消息 - 使用被动回复模式
                 group_id = metadata.get("group_id")
                 msg_id = metadata.get("reply_to_id") or metadata.get("message_id")
-                
+
                 logger.debug(f"[{self.name}] Group message - group_id={group_id}, msg_id={msg_id}, metadata keys={list(metadata.keys())}")
-                
+
                 # 获取并递增 msg_seq（使用小整数）
                 # msg_seq 必须唯一且递增，不能循环重置，否则会被 QQ 服务器识别为重复消息
                 seq_key = f"group_{group_id}"
@@ -217,7 +218,7 @@ class QQChannel(BaseChannel):
                 # 注意：msg_seq 会一直递增（1, 2, 3, ...），永不重置
                 # QQ API 要求每个 (msg_id, msg_seq) 组合必须唯一
                 # 即使超过 1000 也不会重复使用已用过的值
-                
+
                 if self.config.markdown_support:
                     # Markdown 模式
                     logger.debug(f"[{self.name}] Sending group message to {group_id}, msg_id={msg_id}, msg_seq={msg_seq}, markdown=true")
@@ -230,7 +231,7 @@ class QQChannel(BaseChannel):
                             "markdown": {"content": content}
                         }
                         logger.debug(f"[{self.name}] Payload: {payload}")
-                        
+
                         # 使用底层 HTTP 客户端发送请求
                         from botpy.http import Route
                         route = Route("POST", f"/v2/groups/{group_id}/messages", group_openid=group_id)
@@ -265,7 +266,7 @@ class QQChannel(BaseChannel):
                         if c2c_msg_id:
                             payload["msg_id"] = c2c_msg_id
                             payload["msg_seq"] = 1  # 私聊消息的 msg_seq 从 1 开始
-                        
+
                         # 使用底层 HTTP 客户端发送请求
                         from botpy.http import Route
                         route = Route("POST", f"/v2/users/{openid}/messages")

@@ -4,7 +4,6 @@
 """
 
 import asyncio
-from typing import Optional, Type
 
 from loguru import logger
 
@@ -14,9 +13,8 @@ from cli_bridge.config.schema import Config
 
 from .base import BaseChannel
 
-
 # Channel 注册表 - 存储渠道名称到 Channel 类的映射
-_CHANNEL_REGISTRY: dict[str, Type[BaseChannel]] = {}
+_CHANNEL_REGISTRY: dict[str, type[BaseChannel]] = {}
 
 
 def register_channel(name: str):
@@ -32,14 +30,14 @@ def register_channel(name: str):
         class TelegramChannel(BaseChannel):
             ...
     """
-    def decorator(cls: Type[BaseChannel]) -> Type[BaseChannel]:
+    def decorator(cls: type[BaseChannel]) -> type[BaseChannel]:
         _CHANNEL_REGISTRY[name] = cls
         cls.name = name
         return cls
     return decorator
 
 
-def get_channel_class(name: str) -> Optional[Type[BaseChannel]]:
+def get_channel_class(name: str) -> type[BaseChannel] | None:
     """获取已注册的 Channel 类。
 
     Args:
@@ -77,7 +75,7 @@ class ChannelManager:
         self.config = config
         self.bus = bus
         self._channels: dict[str, BaseChannel] = {}
-        self._outbound_task: Optional[asyncio.Task] = None
+        self._outbound_task: asyncio.Task | None = None
 
     @property
     def enabled_channels(self) -> list[str]:
@@ -93,7 +91,7 @@ class ChannelManager:
         """获取所有已创建的 Channel 实例。"""
         return self._channels.copy()
 
-    def get_channel(self, name: str) -> Optional[BaseChannel]:
+    def get_channel(self, name: str) -> BaseChannel | None:
         """获取指定名称的 Channel 实例。
 
         Args:
@@ -104,7 +102,7 @@ class ChannelManager:
         """
         return self._channels.get(name)
 
-    def _create_channel(self, name: str) -> Optional[BaseChannel]:
+    def _create_channel(self, name: str) -> BaseChannel | None:
         """创建指定名称的 Channel 实例。
 
         Args:

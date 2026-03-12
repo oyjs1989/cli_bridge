@@ -6,12 +6,11 @@
 
 import asyncio
 import re
-from typing import Any, Optional
 
 from loguru import logger
-from slack_sdk.socket_mode.websockets import SocketModeClient
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
+from slack_sdk.socket_mode.websockets import SocketModeClient
 from slack_sdk.web.async_client import AsyncWebClient
 
 try:
@@ -24,7 +23,6 @@ except ImportError:
 from cli_bridge.bus.events import OutboundMessage
 from cli_bridge.bus.queue import MessageBus
 from cli_bridge.channels.base import BaseChannel
-from cli_bridge.channels.manager import register_channel
 from cli_bridge.config.schema import SlackConfig
 
 

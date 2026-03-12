@@ -6,7 +6,7 @@ Bridge 使用 @whiskeysockets/baileys 处理 WhatsApp Web 协议。
 
 import asyncio
 import json
-from typing import Any, Optional
+from typing import Any
 
 from loguru import logger
 

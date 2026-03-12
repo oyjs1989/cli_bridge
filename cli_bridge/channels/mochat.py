@@ -6,12 +6,13 @@
 
 import asyncio
 import json
-from loguru import logger
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
+
+from loguru import logger
 
 from cli_bridge.bus.events import OutboundMessage
 from cli_bridge.bus.queue import MessageBus
@@ -56,7 +57,7 @@ class MochatBufferedEntry:
     author: str
     sender_name: str = ""
     sender_username: str = ""
-    timestamp: Optional[int] = None
+    timestamp: int | None = None
     message_id: str = ""
     group_id: str = ""
 
@@ -64,9 +65,9 @@ class MochatBufferedEntry:
 @dataclass
 class DelayState:
     """每个目标的延迟消息状态。"""
-    entries: List[MochatBufferedEntry] = field(default_factory=list)
+    entries: list[MochatBufferedEntry] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    timer: Optional[asyncio.Task] = None
+    timer: asyncio.Task | None = None
 
 
 @dataclass
@@ -130,11 +131,11 @@ def resolve_mochat_target(raw: str) -> MochatTarget:
     )
 
 
-def extract_mention_ids(value: Any) -> List[str]:
+def extract_mention_ids(value: Any) -> list[str]:
     """从提及数据中提取 ID。"""
     if not isinstance(value, list):
         return []
-    ids: List[str] = []
+    ids: list[str] = []
     for item in value:
         if isinstance(item, str):
             if item.strip():
@@ -168,14 +169,14 @@ def resolve_was_mentioned(payload: dict, agent_user_id: str) -> bool:
     return f"<@{agent_user_id}>" in content or f"@{agent_user_id}" in content
 
 
-def build_buffered_body(entries: List[MochatBufferedEntry], is_group: bool) -> str:
+def build_buffered_body(entries: list[MochatBufferedEntry], is_group: bool) -> str:
     """从缓冲条目构建消息体。"""
     if not entries:
         return ""
     if len(entries) == 1:
         return entries[0].raw_body
 
-    lines: List[str] = []
+    lines: list[str] = []
     for entry in entries:
         if not entry.raw_body:
             continue
@@ -189,7 +190,7 @@ def build_buffered_body(entries: List[MochatBufferedEntry], is_group: bool) -> s
     return "\n".join(lines).strip()
 
 
-def parse_timestamp(value: Any) -> Optional[int]:
+def parse_timestamp(value: Any) -> int | None:
     """解析时间戳为毫秒。"""
     if not isinstance(value, str) or not value.strip():
         return None
@@ -241,7 +242,7 @@ class MochatChannel(BaseChannel):
         """
         super().__init__(config, bus)
         self.config: MochatConfig = config
-        self._http: Optional[httpx.AsyncClient] = None
+        self._http: httpx.AsyncClient | None = None
         self._socket: Any = None
         self._ws_connected = False
         self._ws_ready = False
@@ -249,32 +250,32 @@ class MochatChannel(BaseChannel):
         # 状态存储
         self._state_dir = Path.home() / ".cli-bridge" / "mochat"
         self._cursor_path = self._state_dir / "session_cursors.json"
-        self._session_cursor: Dict[str, int] = {}
-        self._cursor_save_task: Optional[asyncio.Task] = None
+        self._session_cursor: dict[str, int] = {}
+        self._cursor_save_task: asyncio.Task | None = None
 
         # 目标管理
-        self._session_set: Set[str] = set()
-        self._panel_set: Set[str] = set()
+        self._session_set: set[str] = set()
+        self._panel_set: set[str] = set()
         self._auto_discover_sessions = False
         self._auto_discover_panels = False
 
         # 会话映射
-        self._cold_sessions: Set[str] = set()
-        self._session_by_converse: Dict[str, str] = {}
+        self._cold_sessions: set[str] = set()
+        self._session_by_converse: dict[str, str] = {}
 
         # 去重
-        self._seen_set: Dict[str, Set[str]] = {}
-        self._seen_queue: Dict[str, deque] = {}
+        self._seen_set: dict[str, set[str]] = {}
+        self._seen_queue: dict[str, deque] = {}
 
         # 延迟状态
-        self._delay_states: Dict[str, DelayState] = {}
+        self._delay_states: dict[str, DelayState] = {}
 
         # 回退模式
         self._fallback_mode = False
-        self._session_fallback_tasks: Dict[str, asyncio.Task] = {}
-        self._panel_fallback_tasks: Dict[str, asyncio.Task] = {}
-        self._refresh_task: Optional[asyncio.Task] = None
-        self._target_locks: Dict[str, asyncio.Lock] = {}
+        self._session_fallback_tasks: dict[str, asyncio.Task] = {}
+        self._panel_fallback_tasks: dict[str, asyncio.Task] = {}
+        self._refresh_task: asyncio.Task | None = None
+        self._target_locks: dict[str, asyncio.Lock] = {}
 
     # ---- 生命周期 ---------------------------------------------------------
 
@@ -398,7 +399,7 @@ class MochatChannel(BaseChannel):
                 self._cold_sessions.add(sid)
 
     @staticmethod
-    def _normalize_id_list(values: List[str]) -> tuple:
+    def _normalize_id_list(values: list[str]) -> tuple:
         """规范化 ID 列表。"""
         cleaned = [str(v).strip() for v in values if str(v).strip()]
         return (
@@ -497,7 +498,7 @@ class MochatChannel(BaseChannel):
 
         return ok
 
-    async def _subscribe_sessions(self, session_ids: List[str]) -> bool:
+    async def _subscribe_sessions(self, session_ids: list[str]) -> bool:
         """订阅会话。"""
         if not session_ids:
             return True
@@ -520,7 +521,7 @@ class MochatChannel(BaseChannel):
             return False
 
         data = ack.get("data")
-        items: List[dict] = []
+        items: list[dict] = []
         if isinstance(data, list):
             items = [i for i in data if isinstance(i, dict)]
         elif isinstance(data, dict):
@@ -533,7 +534,7 @@ class MochatChannel(BaseChannel):
 
         return True
 
-    async def _subscribe_panels(self, panel_ids: List[str]) -> bool:
+    async def _subscribe_panels(self, panel_ids: list[str]) -> bool:
         """订阅面板。"""
         if not self._auto_discover_panels and not panel_ids:
             return True
@@ -597,7 +598,7 @@ class MochatChannel(BaseChannel):
         if not isinstance(sessions, list):
             return
 
-        new_ids: List[str] = []
+        new_ids: list[str] = []
         for s in sessions:
             if not isinstance(s, dict):
                 continue
@@ -631,7 +632,7 @@ class MochatChannel(BaseChannel):
         if not isinstance(raw_panels, list):
             return
 
-        new_ids: List[str] = []
+        new_ids: list[str] = []
         for p in raw_panels:
             if not isinstance(p, dict):
                 continue
@@ -873,7 +874,7 @@ class MochatChannel(BaseChannel):
 
     async def _flush_delayed_entries(
         self, key: str, target_id: str, target_kind: str,
-        reason: str, entry: Optional[MochatBufferedEntry]
+        reason: str, entry: MochatBufferedEntry | None
     ) -> None:
         """刷新延迟条目。"""
         state = self._delay_states.setdefault(key, DelayState())
@@ -894,7 +895,7 @@ class MochatChannel(BaseChannel):
 
     async def _dispatch_entries(
         self, target_id: str, target_kind: str,
-        entries: List[MochatBufferedEntry], was_mentioned: bool
+        entries: list[MochatBufferedEntry], was_mentioned: bool
     ) -> None:
         """分发条目到消息总线。"""
         if not entries:
@@ -927,7 +928,7 @@ class MochatChannel(BaseChannel):
     # ---- API 调用 ----------------------------------------------------------
 
     async def _api_send_session(
-        self, session_id: str, content: str, reply_to: Optional[str]
+        self, session_id: str, content: str, reply_to: str | None
     ) -> None:
         """发送会话消息。"""
         payload = {
@@ -941,7 +942,7 @@ class MochatChannel(BaseChannel):
 
     async def _api_send_panel(
         self, panel_id: str, content: str,
-        reply_to: Optional[str], group_id: Optional[str]
+        reply_to: str | None, group_id: str | None
     ) -> None:
         """发送面板消息。"""
         payload = {
@@ -971,7 +972,7 @@ class MochatChannel(BaseChannel):
             logger.error(f"[{self.name}] API error {path}: {e}")
             return {}
 
-    def _read_group_id(self, metadata: Optional[dict]) -> Optional[str]:
+    def _read_group_id(self, metadata: dict | None) -> str | None:
         """从 metadata 读取 group_id。"""
         if not metadata:
             return None

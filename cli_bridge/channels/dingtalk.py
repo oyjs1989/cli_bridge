@@ -10,7 +10,7 @@ import asyncio
 import json
 import time
 import uuid
-from typing import Any, Dict, Optional, Set
+from typing import Any
 
 from loguru import logger
 
@@ -29,11 +29,11 @@ except ImportError:
 
 try:
     from dingtalk_stream import (
-        DingTalkStreamClient,
-        Credential,
+        AckMessage,
         CallbackHandler,
         CallbackMessage,
-        AckMessage,
+        Credential,
+        DingTalkStreamClient,
     )
     from dingtalk_stream.chatbot import ChatbotMessage
     DINGTALK_AVAILABLE = True
@@ -55,7 +55,7 @@ class AICardStatus:
 
 class AICardInstance:
     """AI Card 实例，用于跟踪流式输出状态。"""
-    
+
     def __init__(
         self,
         card_instance_id: str,
@@ -104,7 +104,7 @@ class DingTalkHandler(CallbackHandler):
 
             sender_id = chatbot_msg.sender_staff_id or chatbot_msg.sender_id
             sender_name = chatbot_msg.sender_nick or "Unknown"
-            
+
             # 判断是否群聊
             is_group = chatbot_msg.conversation_type == "2"
             chat_id = chatbot_msg.conversation_id if is_group else sender_id
@@ -132,7 +132,7 @@ class DingTalkChannel(BaseChannel):
     """钉钉 Channel - 使用 Stream Mode，支持 AI Card 流式输出。"""
 
     name = "dingtalk"
-    
+
     # 支持流式输出的渠道标识
     supports_streaming = True
 
@@ -140,25 +140,25 @@ class DingTalkChannel(BaseChannel):
         super().__init__(config, bus)
         self.config: DingTalkConfig = config
         self._client: Any = None
-        self._http: Optional[httpx.AsyncClient] = None
+        self._http: httpx.AsyncClient | None = None
 
         # Access Token 管理
-        self._access_token: Optional[str] = None
+        self._access_token: str | None = None
         self._token_expiry: float = 0
 
         # AI Card 管理
-        self._ai_cards: Dict[str, AICardInstance] = {}
-        self._active_cards_by_target: Dict[str, str] = {}
+        self._ai_cards: dict[str, AICardInstance] = {}
+        self._active_cards_by_target: dict[str, str] = {}
 
         # 流式消息缓冲
-        self._streaming_buffers: Dict[str, str] = {}
-        self._streaming_card_ids: Dict[str, str] = {}
-        self._streaming_end: Set[str] = set()
-        self._streaming_last_sent_content: Dict[str, str] = {}
-        self._streaming_last_sent_at: Dict[str, float] = {}
+        self._streaming_buffers: dict[str, str] = {}
+        self._streaming_card_ids: dict[str, str] = {}
+        self._streaming_end: set[str] = set()
+        self._streaming_last_sent_content: dict[str, str] = {}
+        self._streaming_last_sent_at: dict[str, float] = {}
 
         # 后台任务
-        self._background_tasks: Set[asyncio.Task] = set()
+        self._background_tasks: set[asyncio.Task] = set()
 
     async def start(self) -> None:
         """启动钉钉 Bot (Stream Mode)。"""
@@ -218,7 +218,7 @@ class DingTalkChannel(BaseChannel):
 
         logger.info(f"[{self.name}] DingTalk bot stopped")
 
-    async def _get_access_token(self) -> Optional[str]:
+    async def _get_access_token(self) -> str | None:
         """获取或刷新 Access Token。"""
         if self._access_token and time.time() < self._token_expiry:
             return self._access_token
@@ -247,7 +247,7 @@ class DingTalkChannel(BaseChannel):
         """获取目标唯一标识。"""
         return f"{self.config.client_id}:{chat_id}"
 
-    async def _create_ai_card(self, chat_id: str, is_group: bool = False) -> Optional[AICardInstance]:
+    async def _create_ai_card(self, chat_id: str, is_group: bool = False) -> AICardInstance | None:
         """创建 AI Card 实例。"""
         token = await self._get_access_token()
         if not token:
@@ -259,7 +259,7 @@ class DingTalkChannel(BaseChannel):
             return None
 
         card_instance_id = f"card_{uuid.uuid4().hex[:24]}"
-        
+
         # 构建 openSpaceId
         if is_group:
             open_space_id = f"dtv1.card//IM_GROUP.{chat_id}"
@@ -301,7 +301,7 @@ class DingTalkChannel(BaseChannel):
                 config=self.config,
             )
             self._ai_cards[card_instance_id] = card
-            
+
             target_key = self._get_target_key(chat_id)
             self._active_cards_by_target[target_key] = card_instance_id
 
@@ -325,7 +325,7 @@ class DingTalkChannel(BaseChannel):
                 card.access_token = new_token
 
         card_template_key = getattr(self.config, 'card_template_key', 'content')
-        
+
         stream_body = {
             "outTrackId": card.card_instance_id,
             "guid": uuid.uuid4().hex,
@@ -418,11 +418,11 @@ class DingTalkChannel(BaseChannel):
             chat_id: 聊天 ID
         """
         target_key = self._get_target_key(chat_id)
-        
+
         # 初始化缓冲区
         if target_key not in self._streaming_buffers:
             self._streaming_buffers[target_key] = ""
-            
+
             # 立即创建 AI Card
             is_group = chat_id.startswith("cid")
             card = await self._create_ai_card(chat_id, is_group)
@@ -444,7 +444,7 @@ class DingTalkChannel(BaseChannel):
             is_final: 是否是最终消息
         """
         target_key = self._get_target_key(chat_id)
-        
+
         # 确保缓冲区已初始化（兼容没有调用 start_streaming 的情况）
         if target_key not in self._streaming_buffers:
             await self.start_streaming(chat_id)
