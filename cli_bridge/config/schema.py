@@ -305,13 +305,37 @@ class ClaudeBackendConfig(BaseModel):
     """Claude 工具执行权限模式。bypassPermissions = 跳过所有确认提示。"""
 
 
+class GeminiBackendConfig(BaseModel):
+    """Gemini CLI backend configuration (used when driver.backend == "gemini")."""
+
+    model_config = {"extra": "ignore"}
+
+    gemini_path: str = "gemini"
+    """Path to the gemini CLI binary."""
+
+    model: str = "gemini-2.5-pro"
+    """Model identifier passed via --model flag."""
+
+    api_key: str = ""
+    """Injected as GEMINI_API_KEY env var. Empty = use OAuth / ADC."""
+
+    google_api_key: str = ""
+    """Injected as GOOGLE_API_KEY env var (alternative to api_key)."""
+
+    yolo: bool = True
+    """Auto-approve all tool-call permission requests."""
+
+    sandbox: bool = False
+    """Pass --sandbox flag to gemini CLI."""
+
+
 class DriverConfig(BaseModel):
     """后端驱动配置（共享字段 + 后端专属嵌套对象）。"""
 
     model_config = {"extra": "ignore"}
 
-    backend: Literal["iflow", "claude"] = "iflow"
-    """AI 后端: iflow 或 claude。"""
+    backend: Literal["iflow", "claude", "gemini"] = "iflow"
+    """AI 后端: iflow, claude 或 gemini。"""
 
     transport: Literal["cli", "stdio", "acp"] = "stdio"
     """通信方式: cli (子进程), stdio (长运行进程), acp (WebSocket)。"""
@@ -332,6 +356,9 @@ class DriverConfig(BaseModel):
     claude: ClaudeBackendConfig | None = None
     """Claude Code 专属配置。backend == "claude" 时自动填充默认值。"""
 
+    gemini: GeminiBackendConfig | None = None
+    """Gemini CLI 专属配置。backend == "gemini" 时自动填充默认值。"""
+
     @model_validator(mode="after")
     def validate_combination(self) -> "DriverConfig":
         """拒绝不支持的 backend + transport 组合。"""
@@ -349,6 +376,8 @@ class DriverConfig(BaseModel):
             self.iflow = IFlowBackendConfig()
         elif self.backend == "claude" and self.claude is None:
             self.claude = ClaudeBackendConfig()
+        elif self.backend == "gemini" and self.gemini is None:
+            self.gemini = GeminiBackendConfig()
         return self
 
 
