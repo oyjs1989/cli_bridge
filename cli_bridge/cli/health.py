@@ -91,6 +91,19 @@ async def _check_iflow_ready(iflow_path: str) -> tuple[bool, str]:
     return True, "iflow is available and logged in."
 
 
+async def _check_gemini_ready(gemini_path: str) -> tuple[bool, str]:
+    """Check that the gemini CLI binary is findable on PATH."""
+    resolved = shutil.which(gemini_path)
+    if resolved:
+        return True, f"gemini CLI is available at {resolved}."
+    if Path(gemini_path).is_file():
+        return True, f"gemini CLI is available at {gemini_path}."
+    return False, (
+        f"gemini CLI not found (searched PATH for '{gemini_path}'). "
+        "Install Gemini CLI: https://github.com/google-gemini/gemini-cli"
+    )
+
+
 async def check_backend_ready(
     backend: str,
     driver: DriverConfig | None = None,
@@ -98,7 +111,7 @@ async def check_backend_ready(
     """Dispatch to the appropriate backend health check.
 
     Args:
-        backend: Active driver backend ('claude' or 'iflow').
+        backend: Active driver backend ('claude', 'iflow', or 'gemini').
         driver: DriverConfig instance (used to resolve binary paths).
 
     Returns:
@@ -110,6 +123,12 @@ async def check_backend_ready(
             claude_path = driver.claude.claude_path
         logger.debug(f"Health check: claude backend, binary={claude_path}")
         return await _check_claude_ready(claude_path)
+    elif backend == "gemini":
+        gemini_path = "gemini"
+        if driver and driver.gemini:
+            gemini_path = driver.gemini.gemini_path
+        logger.debug(f"Health check: gemini backend, binary={gemini_path}")
+        return await _check_gemini_ready(gemini_path)
     else:
         iflow_path = "iflow"
         if driver and driver.iflow:
