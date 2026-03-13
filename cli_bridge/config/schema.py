@@ -448,6 +448,8 @@ class Config(BaseSettings):
             return self.driver.iflow.model
         elif self.driver.backend == "claude" and self.driver.claude:
             return self.driver.claude.model
+        elif self.driver.backend == "gemini" and self.driver.gemini:
+            return self.driver.gemini.model
         return "minimax-m2.5"
 
     def get_timeout(self) -> int:
