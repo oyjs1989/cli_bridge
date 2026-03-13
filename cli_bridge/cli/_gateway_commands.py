@@ -537,6 +537,20 @@ async def _run_gateway(config, verbose: bool = False) -> None:
             timeout=config.get_timeout(),
             mcp_proxy_config=config.mcp_proxy,
         )
+    elif _backend == "gemini":
+        from cli_bridge.engine.gemini_adapter import GeminiACPAdapter
+
+        gemini_cfg = config.driver.gemini
+        adapter = GeminiACPAdapter(
+            gemini_path=gemini_cfg.gemini_path,
+            model=gemini_cfg.model,
+            workspace=Path(workspace) if workspace else None,
+            timeout=config.get_timeout(),
+            api_key=gemini_cfg.api_key,
+            google_api_key=gemini_cfg.google_api_key,
+            yolo=gemini_cfg.yolo,
+            sandbox=gemini_cfg.sandbox,
+        )
     else:
         iflow_cfg = config.driver.iflow
         adapter = IFlowAdapter(
