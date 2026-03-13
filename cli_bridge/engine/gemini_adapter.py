@@ -10,8 +10,8 @@ running Gemini process. Sessions are lost on process restart.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
-import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -20,6 +20,13 @@ from loguru import logger
 
 from cli_bridge.config.loader import DEFAULT_TIMEOUT
 from cli_bridge.engine.base_adapter import BaseAdapter
+
+
+async def _call_callback(cb: Callable, *args: Any) -> None:
+    """Call a callback, awaiting it if it is a coroutine function."""
+    result = cb(*args)
+    if inspect.isawaitable(result):
+        await result
 
 
 class GeminiACPError(Exception):
@@ -39,10 +46,14 @@ class _GeminiClient:
     def register(
         self,
         session_id: str,
+        channel: str,
+        chat_id: str,
         on_chunk: Callable | None,
         on_tool_call: Callable | None,
     ) -> None:
         self._session_cbs[session_id] = {
+            "channel": channel,
+            "chat_id": chat_id,
             "on_chunk": on_chunk,
             "on_tool_call": on_tool_call,
             "text": [],
@@ -61,15 +72,15 @@ class _GeminiClient:
             return
 
         if isinstance(update, AgentMessageChunk):
-            for block in update.content:
-                if isinstance(block, TextContentBlock) and block.text:
-                    cb["text"].append(block.text)
-                    if cb["on_chunk"]:
-                        await cb["on_chunk"](block.text)
+            block = update.content
+            if isinstance(block, TextContentBlock) and block.text:
+                cb["text"].append(block.text)
+                if cb["on_chunk"]:
+                    await _call_callback(cb["on_chunk"], cb["channel"], cb["chat_id"], block.text)
 
         elif isinstance(update, ToolCallStart):
             if cb["on_tool_call"] and update.title:
-                await cb["on_tool_call"](update.title)
+                await _call_callback(cb["on_tool_call"], cb["channel"], cb["chat_id"], update.title)
 
     async def request_permission(
         self, options: list, session_id: str, tool_call: Any, **kwargs: Any
@@ -316,7 +327,7 @@ class GeminiACPAdapter(BaseAdapter):
         message: str,
         channel: str = "cli",
         chat_id: str = "direct",
-        model: str | None = None,
+        model: str | None = None,  # ignored — uses self.model
         timeout: int | None = None,
         on_chunk: Callable | None = None,
         on_tool_call: Callable | None = None,
@@ -324,11 +335,10 @@ class GeminiACPAdapter(BaseAdapter):
     ) -> str:
         from acp import text_block
 
-        await self._start()
         session_id = await self._get_or_create_session(channel, chat_id)
         effective_timeout = timeout or self.timeout
 
-        self._client_impl.register(session_id, on_chunk, on_tool_call)
+        self._client_impl.register(session_id, channel, chat_id, on_chunk, on_tool_call)
         try:
             await asyncio.wait_for(
                 self._conn.prompt(
@@ -347,7 +357,7 @@ class GeminiACPAdapter(BaseAdapter):
         message: str,
         channel: str = "cli",
         chat_id: str = "direct",
-        model: str | None = None,
+        model: str | None = None,  # ignored — uses self.model
         timeout: int | None = None,
     ) -> str:
         return await self.chat_stream(
@@ -359,7 +369,7 @@ class GeminiACPAdapter(BaseAdapter):
         message: str,
         channel: str = "cli",
         chat_id: str = "direct",
-        model: str | None = None,
+        model: str | None = None,  # ignored — uses self.model
         timeout: int | None = None,
     ) -> str:
         # Drop the old ACP session; next call creates a fresh one
