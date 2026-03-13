@@ -1,14 +1,14 @@
 """Cron job types for cli-bridge."""
 
-from dataclasses import dataclass, field
-from typing import Optional, Literal
-from enum import Enum
 import uuid
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Literal
 
 
 class ScheduleKind(str, Enum):
     """Schedule type for cron jobs."""
-    
+
     AT = "at"           # 在指定时间运行一次
     EVERY = "every"     # 每隔 N 毫秒
     CRON = "cron"       # cron 表达式
@@ -28,17 +28,17 @@ class CronSchedule:
     """
     kind: Literal["at", "every", "cron"]
     """Schedule type"""
-    
-    at_ms: Optional[int] = None
+
+    at_ms: int | None = None
     """Timestamp in milliseconds (for AT type)"""
-    
-    every_ms: Optional[int] = None
+
+    every_ms: int | None = None
     """Interval in milliseconds (for EVERY type)"""
-    
-    expr: Optional[str] = None
+
+    expr: str | None = None
     """Cron expression (for CRON type, e.g., '0 9 * * 1-5' for 9 AM weekdays)"""
-    
-    tz: Optional[str] = None
+
+    tz: str | None = None
     """Timezone (e.g., 'Asia/Shanghai', 'UTC')"""
 
 
@@ -60,17 +60,17 @@ class CronPayload:
     """
     kind: Literal["system_event", "agent_turn", "reminder"] = "agent_turn"
     """Payload type: system_event, agent_turn, or reminder"""
-    
+
     message: str = ""
     """Message content to send"""
-    
+
     deliver: bool = False
     """Whether to deliver the message through the channel"""
-    
-    channel: Optional[str] = None
+
+    channel: str | None = None
     """Target channel (telegram, discord, etc.)"""
-    
-    to: Optional[str] = None
+
+    to: str | None = None
     """Target chat/user identifier"""
 
 
@@ -81,16 +81,16 @@ class CronJobState:
     
     匹配 nanobot 的状态定义。
     """
-    next_run_at_ms: Optional[int] = None
+    next_run_at_ms: int | None = None
     """Next scheduled execution timestamp in milliseconds"""
-    
-    last_run_at_ms: Optional[int] = None
+
+    last_run_at_ms: int | None = None
     """Last execution timestamp in milliseconds"""
-    
-    last_status: Optional[Literal["ok", "error", "skipped"]] = None
+
+    last_status: Literal["ok", "error", "skipped"] | None = None
     """Last execution status"""
-    
-    last_error: Optional[str] = None
+
+    last_error: str | None = None
     """Last error message if execution failed"""
 
 
@@ -103,38 +103,38 @@ class CronJob:
     """
     id: str
     """Unique job identifier (short uuid)"""
-    
+
     name: str
     """Human-readable job name"""
-    
+
     enabled: bool = True
     """Whether the job is enabled"""
-    
+
     schedule: CronSchedule = field(default_factory=lambda: CronSchedule(kind="every"))
     """Schedule configuration"""
-    
+
     payload: CronPayload = field(default_factory=CronPayload)
     """Execution payload"""
-    
+
     state: CronJobState = field(default_factory=CronJobState)
     """Runtime state"""
-    
+
     created_at_ms: int = 0
     """Job creation timestamp in milliseconds"""
-    
+
     updated_at_ms: int = 0
     """Last update timestamp in milliseconds"""
-    
+
     delete_after_run: bool = False
     """Whether to delete the job after one-time execution"""
-    
+
     @classmethod
     def create(
         cls,
         name: str,
         schedule: CronSchedule,
         payload: CronPayload,
-        job_id: Optional[str] = None,
+        job_id: str | None = None,
         enabled: bool = True,
         delete_after_run: bool = False,
     ) -> "CronJob":
@@ -153,7 +153,7 @@ class CronJob:
             A new CronJob instance
         """
         import time
-        
+
         now = int(time.time() * 1000)
         return cls(
             id=job_id or str(uuid.uuid4())[:8],
@@ -165,7 +165,7 @@ class CronJob:
             updated_at_ms=now,
             delete_after_run=delete_after_run,
         )
-    
+
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
         return {
@@ -196,14 +196,14 @@ class CronJob:
             "updatedAtMs": self.updated_at_ms,
             "deleteAfterRun": self.delete_after_run,
         }
-    
+
     @classmethod
     def from_dict(cls, data: dict) -> "CronJob":
         """Create from dictionary."""
         schedule_data = data.get("schedule", {})
         payload_data = data.get("payload", {})
         state_data = data.get("state", {})
-        
+
         return cls(
             id=data["id"],
             name=data["name"],
@@ -243,14 +243,14 @@ class CronStore:
     """
     version: int = 1
     jobs: list[CronJob] = field(default_factory=list)
-    
+
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
         return {
             "version": self.version,
             "jobs": [job.to_dict() for job in self.jobs],
         }
-    
+
     @classmethod
     def from_dict(cls, data: dict) -> "CronStore":
         """Create from dictionary."""

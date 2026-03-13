@@ -1,7 +1,6 @@
 import asyncio
 import json
-import subprocess
-import time
+
 
 async def main():
     print("Starting iflow process...")
@@ -11,9 +10,9 @@ async def main():
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE
     )
-    
+
     responses = {}
-    
+
     async def read_output():
         while True:
             line = await process.stdout.readline()
@@ -27,19 +26,19 @@ async def main():
                     responses[data["id"]] = data
             except:
                 pass
-            
+
     async def read_err():
         while True:
             line = await process.stderr.readline()
             if not line:
                 break
             print("STDERR:", line.decode().strip())
-            
+
     readers = asyncio.gather(read_output(), read_err())
 
     # Wait for ready signal
     await asyncio.sleep(2)
-    
+
     init_req = {
         "jsonrpc": "2.0",
         "method": "initialize",
@@ -58,7 +57,7 @@ async def main():
     process.stdin.write((json.dumps(init_req) + "\n").encode())
     await process.stdin.drain()
     await asyncio.sleep(1)
-    
+
     # Create session 1
     req_s1 = {
         "jsonrpc": "2.0",
@@ -70,7 +69,7 @@ async def main():
     await process.stdin.drain()
     await asyncio.sleep(1)
     session_id_main = responses.get("s1", {}).get("result", {}).get("sessionId")
-    
+
     # Create session 2
     req_s2 = {
         "jsonrpc": "2.0",
@@ -82,9 +81,9 @@ async def main():
     await process.stdin.drain()
     await asyncio.sleep(1)
     session_id_sub = responses.get("s2", {}).get("result", {}).get("sessionId")
-    
+
     print(f"Sessions created: {session_id_main}, {session_id_sub}")
-    
+
     req1 = {
         "jsonrpc": "2.0",
         "method": "session/prompt",
@@ -95,7 +94,7 @@ async def main():
         },
         "id": 1
     }
-    
+
     req2 = {
         "jsonrpc": "2.0",
         "method": "session/prompt",
@@ -106,29 +105,29 @@ async def main():
         },
         "id": 2
     }
-    
+
     # Send req1
     print(f"Sending req1 (long task on {session_id_main})...")
     process.stdin.write((json.dumps(req1) + "\n").encode())
     await process.stdin.drain()
-    
+
     # Wait a bit
     await asyncio.sleep(2)
-    
+
     # Send req2 with DIFFERENT session ID
     print(f"Sending req2 (concurrent prompt on {session_id_sub})...")
     process.stdin.write((json.dumps(req2) + "\n").encode())
     await process.stdin.drain()
-    
+
     # Wait for both tasks to progress
     await asyncio.sleep(8)
-    
+
     process.kill()
     try:
         await readers
     except asyncio.CancelledError:
         pass
-    
+
 if __name__ == "__main__":
     try:
         asyncio.run(main())

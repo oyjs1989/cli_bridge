@@ -8,7 +8,6 @@ from pydantic import ValidationError
 from cli_bridge.config.loader import load_config
 from cli_bridge.config.schema import Config, DriverConfig
 
-
 # ── New backend + transport format ───────────────────────────────────────────
 
 def test_new_backend_transport_round_trip(tmp_path):

@@ -1,7 +1,6 @@
 """Message bus for inter-component communication."""
 
 import asyncio
-from typing import Optional
 
 from loguru import logger
 
@@ -32,8 +31,8 @@ class MessageBus:
         # Channel consumes outbound message
         msg = await bus.consume_outbound()
     """
-    
-    def __init__(self, max_size: int = 100, recorder: Optional[ChannelRecorder] = None):
+
+    def __init__(self, max_size: int = 100, recorder: ChannelRecorder | None = None):
         """
         Initialize the message bus.
         
@@ -45,13 +44,13 @@ class MessageBus:
         self._outbound: asyncio.Queue[OutboundMessage] = asyncio.Queue(maxsize=max_size)
         self._running = True
         self._recorder = recorder
-    
-    def _get_recorder(self) -> Optional[ChannelRecorder]:
+
+    def _get_recorder(self) -> ChannelRecorder | None:
         """Get the recorder instance."""
         if self._recorder is not None:
             return self._recorder
         return get_recorder()
-    
+
     async def publish_inbound(self, msg: InboundMessage) -> None:
         """
         Publish an inbound message.
@@ -62,19 +61,19 @@ class MessageBus:
         if not self._running:
             logger.warning("Bus is stopped, dropping inbound message")
             return
-        
+
         try:
             self._inbound.put_nowait(msg)
             logger.debug(f"Published inbound message from {msg.channel}:{msg.chat_id}")
-            
+
             # Record the inbound message
             recorder = self._get_recorder()
             if recorder:
                 recorder.record_inbound(msg)
         except asyncio.QueueFull:
             logger.warning("Inbound queue full, dropping message")
-    
-    async def consume_inbound(self, timeout: Optional[float] = None) -> InboundMessage:
+
+    async def consume_inbound(self, timeout: float | None = None) -> InboundMessage:
         """
         Consume an inbound message.
         
@@ -90,7 +89,7 @@ class MessageBus:
         if timeout is not None:
             return await asyncio.wait_for(self._inbound.get(), timeout=timeout)
         return await self._inbound.get()
-    
+
     async def publish_outbound(self, msg: OutboundMessage) -> None:
         """
         Publish an outbound message.
@@ -101,19 +100,19 @@ class MessageBus:
         if not self._running:
             logger.warning("Bus is stopped, dropping outbound message")
             return
-        
+
         try:
             self._outbound.put_nowait(msg)
             logger.debug(f"Published outbound message to {msg.channel}:{msg.chat_id}")
-            
+
             # Record the outbound message
             recorder = self._get_recorder()
             if recorder:
                 recorder.record_outbound(msg)
         except asyncio.QueueFull:
             logger.warning("Outbound queue full, dropping message")
-    
-    async def consume_outbound(self, timeout: Optional[float] = None) -> OutboundMessage:
+
+    async def consume_outbound(self, timeout: float | None = None) -> OutboundMessage:
         """
         Consume an outbound message.
         
@@ -129,32 +128,32 @@ class MessageBus:
         if timeout is not None:
             return await asyncio.wait_for(self._outbound.get(), timeout=timeout)
         return await self._outbound.get()
-    
+
     def stop(self) -> None:
         """Stop the bus and reject new messages."""
         self._running = False
         logger.info("Message bus stopped")
-    
+
     def start(self) -> None:
         """Start the bus."""
         self._running = True
         logger.info("Message bus started")
-    
+
     @property
     def is_running(self) -> bool:
         """Check if the bus is running."""
         return self._running
-    
+
     @property
     def inbound_size(self) -> int:
         """Get the current size of the inbound queue."""
         return self._inbound.qsize()
-    
+
     @property
     def outbound_size(self) -> int:
         """Get the current size of the outbound queue."""
         return self._outbound.qsize()
-    
+
     def clear(self) -> None:
         """Clear all pending messages."""
         while not self._inbound.empty():
@@ -162,13 +161,13 @@ class MessageBus:
                 self._inbound.get_nowait()
             except asyncio.QueueEmpty:
                 break
-        
+
         while not self._outbound.empty():
             try:
                 self._outbound.get_nowait()
             except asyncio.QueueEmpty:
                 break
-        
+
         logger.info("Message bus cleared")
 
     def task_done_inbound(self) -> None:

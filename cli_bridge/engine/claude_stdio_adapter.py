@@ -146,7 +146,7 @@ class ClaudeStdioAdapter(BaseAdapter):
         session_id = self.session_mappings.get_session_id(channel, chat_id)
 
         try:
-            from claude_agent_sdk import query, ClaudeAgentOptions
+            from claude_agent_sdk import ClaudeAgentOptions, query
 
             options = ClaudeAgentOptions(
                 max_turns=self.max_turns,
@@ -165,7 +165,7 @@ class ClaudeStdioAdapter(BaseAdapter):
                 cli_path=self.claude_path,
                 model=effective_model,
             ):
-                from claude_agent_sdk.types import ResultMessage, AssistantMessage, TextBlock
+                from claude_agent_sdk.types import AssistantMessage, ResultMessage, TextBlock
                 if hasattr(event, "session_id") and event.session_id:
                     new_session_id = event.session_id
                 if isinstance(event, ResultMessage):
@@ -203,7 +203,7 @@ class ClaudeStdioAdapter(BaseAdapter):
         session_id = self.session_mappings.get_session_id(channel, chat_id)
 
         try:
-            from claude_agent_sdk import query, ClaudeAgentOptions
+            from claude_agent_sdk import ClaudeAgentOptions, query
             from claude_agent_sdk.types import (
                 AssistantMessage,
                 ResultMessage,

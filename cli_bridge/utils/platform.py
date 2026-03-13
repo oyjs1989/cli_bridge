@@ -6,9 +6,8 @@ import os
 import platform
 import shutil
 import subprocess
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
-
 
 _WINDOWS_EXTENSIONS = (".cmd", ".exe", ".bat", ".com")
 

@@ -7,7 +7,6 @@ import pytest
 
 from cli_bridge.engine.claude_stdio_adapter import ClaudeStdioAdapter
 
-
 # ── identity ──────────────────────────────────────────────────────────────────
 
 def test_transport_property(tmp_path):

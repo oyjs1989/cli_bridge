@@ -8,29 +8,28 @@ and message count. The actual conversation history is managed by iflow.
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 from pydantic import BaseModel
 
 
 class SessionMetadata(BaseModel):
     """Session metadata model."""
-    
+
     key: str
     """Session key in format: channel:chat_id"""
-    
+
     channel: str
     """Channel name (telegram, discord, etc.)"""
-    
+
     chat_id: str
     """Chat/channel/conversation identifier"""
-    
+
     created_at: str
     """ISO format creation timestamp"""
-    
+
     last_active: str
     """ISO format last active timestamp"""
-    
+
     message_count: int = 0
     """Number of messages in this session"""
 
@@ -51,7 +50,7 @@ class SessionManager:
         >>> manager.create_session(key)
         '/path/to/workspace/sessions/telegram_123456.json'
     """
-    
+
     def __init__(self, workspace_path: str):
         """Initialize the session manager.
         
@@ -62,7 +61,7 @@ class SessionManager:
         self.workspace_path = Path(workspace_path)
         self.session_dir = self.workspace_path / "sessions"
         self.session_dir.mkdir(parents=True, exist_ok=True)
-    
+
     def get_session_key(self, channel: str, chat_id: str) -> str:
         """Get session key from channel and chat_id.
         
@@ -74,7 +73,7 @@ class SessionManager:
             Session key in format 'channel:chat_id'
         """
         return f"{channel}:{chat_id}"
-    
+
     def _get_session_filename(self, session_key: str) -> str:
         """Convert session key to filename.
         
@@ -86,7 +85,7 @@ class SessionManager:
         """
         # Replace ':' with '_' for filesystem compatibility
         return f"{session_key.replace(':', '_')}.json"
-    
+
     def get_session_file(self, session_key: str) -> Path:
         """Get the path to the session file.
         
@@ -98,7 +97,7 @@ class SessionManager:
         """
         filename = self._get_session_filename(session_key)
         return self.session_dir / filename
-    
+
     def session_exists(self, session_key: str) -> bool:
         """Check if a session exists.
         
@@ -110,7 +109,7 @@ class SessionManager:
         """
         session_file = self.get_session_file(session_key)
         return session_file.exists()
-    
+
     def create_session(self, session_key: str) -> str:
         """Create a new session.
         
@@ -125,15 +124,15 @@ class SessionManager:
         """
         if self.session_exists(session_key):
             return str(self.get_session_file(session_key))
-        
+
         # Parse channel and chat_id from key
         parts = session_key.split(":", 1)
         if len(parts) != 2:
             raise ValueError(f"Invalid session key format: {session_key}")
-        
+
         channel, chat_id = parts
         now = datetime.now(timezone.utc).isoformat()
-        
+
         metadata = SessionMetadata(
             key=session_key,
             channel=channel,
@@ -142,16 +141,16 @@ class SessionManager:
             last_active=now,
             message_count=0,
         )
-        
+
         session_file = self.get_session_file(session_key)
         session_file.write_text(
             metadata.model_dump_json(indent=2),
             encoding="utf-8"
         )
-        
+
         return str(session_file)
-    
-    def get_session(self, session_key: str) -> Optional[SessionMetadata]:
+
+    def get_session(self, session_key: str) -> SessionMetadata | None:
         """Get session metadata.
         
         Args:
@@ -162,14 +161,14 @@ class SessionManager:
         """
         if not self.session_exists(session_key):
             return None
-        
+
         session_file = self.get_session_file(session_key)
         try:
             data = json.loads(session_file.read_text(encoding="utf-8"))
             return SessionMetadata(**data)
         except (json.JSONDecodeError, ValueError):
             return None
-    
+
     def list_sessions(self) -> list[dict]:
         """List all sessions.
         
@@ -178,7 +177,7 @@ class SessionManager:
             (most recent first)
         """
         sessions = []
-        
+
         for session_file in self.session_dir.glob("*.json"):
             try:
                 data = json.loads(session_file.read_text(encoding="utf-8"))
@@ -186,16 +185,16 @@ class SessionManager:
             except (json.JSONDecodeError, ValueError):
                 # Skip invalid session files
                 continue
-        
+
         # Sort by last_active, most recent first
         sessions.sort(key=lambda s: s.get("last_active", ""), reverse=True)
-        
+
         return sessions
-    
+
     def update_session(
         self,
         session_key: str,
-        metadata: Optional[dict] = None,
+        metadata: dict | None = None,
         increment_count: bool = False,
     ) -> bool:
         """Update session metadata.
@@ -214,30 +213,30 @@ class SessionManager:
         session_data = self.get_session(session_key)
         if session_data is None:
             return False
-        
+
         # Update last_active timestamp
         now = datetime.now(timezone.utc).isoformat()
         session_data.last_active = now
-        
+
         # Increment message count if requested
         if increment_count:
             session_data.message_count += 1
-        
+
         # Apply additional metadata updates
         if metadata:
             for key, value in metadata.items():
                 if hasattr(session_data, key):
                     setattr(session_data, key, value)
-        
+
         # Write updated metadata
         session_file = self.get_session_file(session_key)
         session_file.write_text(
             session_data.model_dump_json(indent=2),
             encoding="utf-8"
         )
-        
+
         return True
-    
+
     def delete_session(self, session_key: str) -> bool:
         """Delete a session.
         
@@ -253,11 +252,11 @@ class SessionManager:
         """
         if not self.session_exists(session_key):
             return False
-        
+
         session_file = self.get_session_file(session_key)
         session_file.unlink()
         return True
-    
+
     def get_or_create_session(self, channel: str, chat_id: str) -> str:
         """Get existing session or create a new one.
         
@@ -272,7 +271,7 @@ class SessionManager:
         """
         session_key = self.get_session_key(channel, chat_id)
         return self.create_session(session_key)
-    
+
     def touch_session(self, channel: str, chat_id: str) -> bool:
         """Update session's last_active timestamp.
         
@@ -288,7 +287,7 @@ class SessionManager:
         """
         session_key = self.get_session_key(channel, chat_id)
         return self.update_session(session_key, increment_count=True)
-    
+
     def get_sessions_by_channel(self, channel: str) -> list[dict]:
         """Get all sessions for a specific channel.
         
@@ -300,7 +299,7 @@ class SessionManager:
         """
         all_sessions = self.list_sessions()
         return [s for s in all_sessions if s.get("channel") == channel]
-    
+
     def cleanup_old_sessions(
         self,
         days_old: int = 30,
@@ -318,18 +317,18 @@ class SessionManager:
         """
         cutoff = datetime.now(timezone.utc)
         deleted = []
-        
+
         for session_data in self.list_sessions():
             last_active_str = session_data.get("last_active", "")
             if not last_active_str:
                 continue
-            
+
             try:
                 last_active = datetime.fromisoformat(
                     last_active_str.replace("Z", "+00:00")
                 )
                 age_days = (cutoff - last_active.replace(tzinfo=timezone.utc)).days
-                
+
                 if age_days > days_old:
                     session_key = session_data.get("key", "")
                     if not dry_run:
@@ -337,5 +336,5 @@ class SessionManager:
                     deleted.append(session_key)
             except ValueError:
                 continue
-        
+
         return deleted

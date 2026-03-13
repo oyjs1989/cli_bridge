@@ -11,9 +11,9 @@ Features:
 """
 
 import asyncio
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Coroutine, Optional
 
 from loguru import logger
 
@@ -26,7 +26,7 @@ class ProgressSession:
     start_time: float = field(default_factory=lambda: datetime.now().timestamp())
     last_summary_time: float = field(default_factory=lambda: datetime.now().timestamp())
     loop_count: int = 0
-    last_phase: Optional[str] = None
+    last_phase: str | None = None
     last_status: str = "running"
 
 
@@ -49,8 +49,8 @@ class ProgressManager:
         self.interval = interval_seconds
         self.enabled = enabled
         self._sessions: dict[str, ProgressSession] = {}
-        self._task: Optional[asyncio.Task] = None
-        self._send_callback: Optional[Callable[..., Coroutine]] = None
+        self._task: asyncio.Task | None = None
+        self._send_callback: Callable[..., Coroutine] | None = None
 
     def set_send_callback(self, callback: Callable[..., Coroutine]) -> None:
         """Set the callback for sending progress messages.
@@ -100,9 +100,9 @@ class ProgressManager:
     def update_progress(
         self,
         session_id: str,
-        loop_count: Optional[int] = None,
-        phase: Optional[str] = None,
-        status: Optional[str] = None,
+        loop_count: int | None = None,
+        phase: str | None = None,
+        status: str | None = None,
     ) -> None:
         """Update progress data for a session."""
         session = self._sessions.get(session_id)

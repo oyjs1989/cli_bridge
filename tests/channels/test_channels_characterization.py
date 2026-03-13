@@ -13,14 +13,11 @@ Characterized behaviors:
 """
 from __future__ import annotations
 
-import pytest
-
 from cli_bridge.bus.events import OutboundMessage
 from cli_bridge.bus.queue import MessageBus
 from cli_bridge.channels.base import BaseChannel
 from cli_bridge.channels.telegram import TelegramChannel
 from cli_bridge.config.schema import TelegramConfig
-
 
 # ---------------------------------------------------------------------------
 # Helpers

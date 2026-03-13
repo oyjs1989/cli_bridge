@@ -1,8 +1,9 @@
 """Heartbeat service - periodic agent wake-up to check for tasks."""
 
 import asyncio
+from collections.abc import Callable, Coroutine
 from pathlib import Path
-from typing import Any, Callable, Coroutine, Optional
+from typing import Any
 
 from loguru import logger
 
@@ -23,16 +24,16 @@ def _is_heartbeat_empty(content: str | None) -> bool:
     """Check if HEARTBEAT.md has no actionable content."""
     if not content:
         return True
-    
+
     # Lines to skip: empty, headers, HTML comments, empty checkboxes
     skip_patterns = {"- [ ]", "* [ ]", "- [x]", "* [x]"}
-    
+
     for line in content.split("\n"):
         line = line.strip()
         if not line or line.startswith("#") or line.startswith("<!--") or line in skip_patterns:
             continue
         return False  # Found actionable content
-    
+
     return True
 
 
@@ -76,12 +77,12 @@ class HeartbeatService:
         self.enabled = enabled
         self._running = False
         self._task: asyncio.Task | None = None
-    
+
     @property
     def heartbeat_file(self) -> Path:
         """获取 HEARTBEAT.md 文件路径"""
         return self.workspace / "HEARTBEAT.md"
-    
+
     def _read_heartbeat_file(self) -> str | None:
         """读取 HEARTBEAT.md 内容"""
         if self.heartbeat_file.exists():
@@ -91,7 +92,7 @@ class HeartbeatService:
                 logger.error("Failed to read HEARTBEAT.md: {}", e)
                 return None
         return None
-    
+
     async def start(self) -> None:
         """启动心跳服务"""
         if not self.enabled:
@@ -100,11 +101,11 @@ class HeartbeatService:
         if self._running:
             logger.warning("Heartbeat service already running")
             return
-        
+
         self._running = True
         self._task = asyncio.create_task(self._run_loop())
         logger.info(f"Heartbeat service started (interval: {self.interval_s}s)")
-    
+
     def stop(self) -> None:
         """停止心跳服务"""
         self._running = False
@@ -112,7 +113,7 @@ class HeartbeatService:
             self._task.cancel()
             self._task = None
         logger.info("Heartbeat service stopped")
-    
+
     async def _run_loop(self) -> None:
         """心跳循环"""
         while self._running:
@@ -124,18 +125,18 @@ class HeartbeatService:
                 break
             except Exception as e:
                 logger.error(f"Heartbeat error: {e}")
-    
+
     async def _tick(self) -> None:
         """执行单次心跳检查"""
         content = self._read_heartbeat_file()
-        
+
         # 如果 HEARTBEAT.md 为空或不存在，跳过
         if _is_heartbeat_empty(content):
             logger.debug("Heartbeat: no tasks (HEARTBEAT.md empty)")
             return
-        
+
         logger.info("Heartbeat: checking for tasks...")
-        
+
         if self.on_heartbeat:
             try:
                 response = await self.on_heartbeat(HEARTBEAT_PROMPT)
@@ -147,7 +148,7 @@ class HeartbeatService:
                         await self.on_notify(response)
             except Exception as e:
                 logger.error(f"Heartbeat execution failed: {e}")
-    
+
     async def trigger_now(self) -> str | None:
         """
         手动触发一次心跳
@@ -158,7 +159,7 @@ class HeartbeatService:
         if self.on_heartbeat:
             return await self.on_heartbeat(HEARTBEAT_PROMPT)
         return None
-    
+
     def is_running(self) -> bool:
         """检查心跳服务是否正在运行"""
         return self._running and self._task is not None and not self._task.done()

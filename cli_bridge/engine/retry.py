@@ -7,17 +7,17 @@ Provides exponential backoff retry logic that can wrap any async callable.
 """
 
 import asyncio
-from typing import Any, Callable, Coroutine, Optional, TypeVar
+from collections.abc import Callable, Coroutine
+from typing import Any, TypeVar
 
 from loguru import logger
-
 
 T = TypeVar("T")
 
 
 class RetryExhaustedError(Exception):
     """Raised when all retry attempts are exhausted."""
-    def __init__(self, message: str, last_error: Optional[Exception] = None):
+    def __init__(self, message: str, last_error: Exception | None = None):
         super().__init__(message)
         self.last_error = last_error
 
@@ -52,7 +52,7 @@ async def with_retry(
     Raises:
         RetryExhaustedError: When all retries are exhausted
     """
-    last_error: Optional[Exception] = None
+    last_error: Exception | None = None
     delay = base_delay
 
     for attempt in range(1, max_retries + 1):
@@ -88,8 +88,8 @@ async def chat_with_retry(
     message: str,
     channel: str = "cli",
     chat_id: str = "direct",
-    model: Optional[str] = None,
-    timeout: Optional[int] = None,
+    model: str | None = None,
+    timeout: int | None = None,
     max_retries: int = 3,
 ) -> str:
     """Convenience wrapper: call adapter.chat() with retry.

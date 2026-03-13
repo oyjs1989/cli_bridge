@@ -12,12 +12,9 @@ After refactoring, they must still be GREEN (behavior preserved).
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
-
 
 # ---------------------------------------------------------------------------
 # Helpers

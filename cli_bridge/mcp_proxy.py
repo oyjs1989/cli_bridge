@@ -8,7 +8,7 @@ import json
 import os
 import signal
 import sys
-from typing import Any, Optional
+from typing import Any
 
 from aiohttp import web
 
@@ -19,7 +19,7 @@ class MCPServer:
     def __init__(self, name: str, config: dict[str, Any]):
         self.name = name
         self.config = config
-        self.process: Optional[asyncio.subprocess.Process] = None
+        self.process: asyncio.subprocess.Process | None = None
         self.running = False
 
     async def start(self) -> None:
@@ -86,7 +86,7 @@ class MCPProxy:
 
     @staticmethod
     def _load_config(config_path: str) -> dict[str, Any]:
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, encoding="utf-8") as f:
             return json.load(f)
 
     async def start_servers(self) -> None:

@@ -35,14 +35,14 @@ Example:
     await service.start()
 """
 
-from cli_bridge.cron.types import (
-    ScheduleKind,
-    Schedule,
-    CronPayload,
-    CronJobState,
-    CronJob,
-)
 from cli_bridge.cron.service import CronService
+from cli_bridge.cron.types import (
+    CronJob,
+    CronJobState,
+    CronPayload,
+    Schedule,
+    ScheduleKind,
+)
 
 __all__ = [
     "ScheduleKind",

@@ -1,13 +1,10 @@
 """Tests for ClaudeAdapter using claude-agent-sdk."""
 
-from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from claude_agent_sdk.types import AssistantMessage, ResultMessage, TextBlock, ToolUseBlock
-from cli_bridge.engine.claude_adapter import ClaudeAdapter, ClaudeAdapterError
 
+from cli_bridge.engine.claude_adapter import ClaudeAdapter
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 

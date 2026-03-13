@@ -1,7 +1,7 @@
 """Utility functions for cli-bridge."""
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import aiohttp
 from loguru import logger
@@ -96,7 +96,6 @@ def sync_mcp_from_iflow(overwrite: bool = False) -> bool:
         True if sync successful, False otherwise.
     """
     import json
-    import shutil
 
     iflow_config_dir = get_iflow_config_dir()
     iflow_settings = iflow_config_dir / "settings.json"
@@ -106,7 +105,7 @@ def sync_mcp_from_iflow(overwrite: bool = False) -> bool:
         return False
 
     try:
-        with open(iflow_settings, "r", encoding="utf-8") as f:
+        with open(iflow_settings, encoding="utf-8") as f:
             iflow_data = json.load(f)
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse iflow settings: {e}")
@@ -138,7 +137,7 @@ def sync_mcp_from_iflow(overwrite: bool = False) -> bool:
     if target_config.exists() and not overwrite:
         # 合并配置
         try:
-            with open(target_config, "r", encoding="utf-8") as f:
+            with open(target_config, encoding="utf-8") as f:
                 existing_config = json.load(f)
 
             # 合并 MCP 服务器
@@ -161,8 +160,8 @@ def sync_mcp_from_iflow(overwrite: bool = False) -> bool:
 async def discover_mcp_servers(
     proxy_host: str = "localhost",
     proxy_port: int = 8888,
-    allowlist: Optional[list[str]] = None,
-    blocklist: Optional[list[str]] = None,
+    allowlist: list[str] | None = None,
+    blocklist: list[str] | None = None,
     max_servers: int = 10,
     timeout: int = 5,
 ) -> list[dict[str, Any]]:

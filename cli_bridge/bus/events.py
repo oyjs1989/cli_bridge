@@ -1,7 +1,7 @@
 """Message events for cli-bridge."""
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass
@@ -14,26 +14,26 @@ class InboundMessage:
     """
     channel: str
     """Channel name (telegram, discord, whatsapp, feishu, slack, dingtalk, qq, email, mochat)"""
-    
+
     sender_id: str
     """Sender's unique identifier on the platform"""
-    
+
     chat_id: str
     """Chat/channel/conversation identifier"""
-    
+
     content: str
     """Message text content"""
-    
+
     media: list[str] = field(default_factory=list)
     """Optional list of media URLs (images, files, etc.)"""
-    
+
     metadata: dict[str, Any] = field(default_factory=dict)
     """Channel-specific metadata"""
-    
-    session_key_override: Optional[str] = None
+
+    session_key_override: str | None = None
     """Optional session key override for thread-scoped sessions"""
-    
-    reply_to_id: Optional[str] = None
+
+    reply_to_id: str | None = None
     """ID of the message being replied to (if any)"""
 
 
@@ -47,16 +47,16 @@ class OutboundMessage:
     """
     channel: str
     """Target channel name"""
-    
+
     chat_id: str
     """Target chat/channel/conversation identifier"""
-    
+
     content: str
     """Message text content"""
-    
+
     metadata: dict[str, Any] = field(default_factory=dict)
     """Channel-specific metadata and delivery options"""
-    
+
     media: list[str] = field(default_factory=list)
     """List of local file paths to send as media attachments.
     
@@ -64,10 +64,10 @@ class OutboundMessage:
     automatically upload and deliver these files.
     Ported from cli-bridge file callback feature.
     """
-    
-    reply_to_id: Optional[str] = None
+
+    reply_to_id: str | None = None
     """ID of the message to reply to (if any)"""
-    
+
     def with_progress(self, content: str, tool_hint: bool = False) -> "OutboundMessage":
         """Create a progress update message."""
         return OutboundMessage(

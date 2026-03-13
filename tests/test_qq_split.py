@@ -8,10 +8,8 @@
 """
 
 import asyncio
-import pytest
 
 from cli_bridge.config.schema import QQConfig
-
 
 # ---------------------------------------------------------------------------
 # 核心辅助：模拟 loop.py on_chunk 中 QQ 分段逻辑（行级缓冲，最终版）

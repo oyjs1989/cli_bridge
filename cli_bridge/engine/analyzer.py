@@ -14,10 +14,8 @@ Features:
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 from loguru import logger
-
 
 # File extension categories
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico", ".tiff"}
@@ -33,7 +31,7 @@ FILE_PATH_PATTERN = re.compile(r"(?:[a-zA-Z]:\\|/)?[\w\-\\/\.]+\.\w+")
 class AnalysisResult:
     """Result of analyzing iflow CLI output."""
     can_continue: bool = False
-    next_phase: Optional[str] = None
+    next_phase: str | None = None
     is_complete: bool = False
     has_error: bool = False
     needs_input: bool = False
@@ -133,7 +131,7 @@ class ResultAnalyzer:
     def _check_needs_input(self, output: str) -> bool:
         return any(p.search(output) for p in self.INPUT_PATTERNS)
 
-    def _extract_next_phase(self, output: str) -> Optional[str]:
+    def _extract_next_phase(self, output: str) -> str | None:
         """Extract next phase from output using pattern matching."""
         for pattern in self.NEXT_PHASE_PATTERNS:
             match = pattern.search(output)

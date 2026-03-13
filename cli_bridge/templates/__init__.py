@@ -1,7 +1,7 @@
 """Templates module."""
 
-from pathlib import Path
 from importlib.resources import files
+from pathlib import Path
 
 
 def get_template_path(name: str) -> Path:

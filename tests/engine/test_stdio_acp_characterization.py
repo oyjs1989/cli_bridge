@@ -6,18 +6,14 @@ They must be GREEN on unmodified source code.
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from cli_bridge.engine.stdio_acp import (
     StdioACPAdapter,
     StdioACPConnectionError,
-    StdioACPError,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
