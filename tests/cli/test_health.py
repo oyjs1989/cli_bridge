@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import patch
 from cli_bridge.cli.health import check_backend_ready
-from cli_bridge.config.schema import DriverConfig, GeminiBackendConfig
+from cli_bridge.config.schema import DriverConfig
 
 
 async def test_check_backend_ready_gemini_not_found():
