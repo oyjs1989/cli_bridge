@@ -93,6 +93,10 @@ Tests use `FakeAdapter` patterns to stub out actual CLI execution. The `asyncio_
 - Python 3.10+ (targets 3.10, 3.11, 3.12) + Pydantic v2 (config/validation), Typer (CLI), loguru (logging), claude-agent-sdk (Claude backend) (002-split-driver-config)
 - Python 3.10, 3.11, 3.12 + Pydantic v2 (config), Typer (CLI), FastAPI + Uvicorn (Web UI), loguru (logging), claude-agent-sdk v0.1.48 (Claude backend), asyncio (concurrency), aiohttp (MCP proxy HTTP layer) (003-post-decouple-followups)
 - `~/.cli-bridge/config.json` (gateway config), `~/.cli-bridge/config/.mcp_proxy_config.json` (MCP server defs), `~/.cli-bridge/session_mappings.json` (session map), `~/.cli-bridge/workspace/channel/` (ChannelRecorder), `~/.cli-bridge/sessions/*.json` (ACP session files for iflow) (003-post-decouple-followups)
+- Python 3.10–3.12 (venv uses 3.11) + Typer, Pydantic v2, FastAPI/Uvicorn, claude-agent-sdk v0.1.48, loguru, asyncio, aiohttp, pytest + pytest-asyncio (004-tdd-refactor-skill)
+- JSON files at `~/.cli-bridge/`; no relational DB (004-tdd-refactor-skill)
+- Python 3.10, 3.11, 3.12 + Pydantic v2 (config), Typer (CLI), FastAPI + Uvicorn (Web UI), asyncio, loguru, claude-agent-sdk v0.1.48, aiohttp (MCP proxy) (005-incremental-refactor)
+- `~/.cli-bridge/config.json`, `~/.cli-bridge/session_mappings.json`, `~/.cli-bridge/workspace/` (channel recorder) (005-incremental-refactor)
 
 ## Recent Changes
 - 001-decouple-iflow-backend: Added Python 3.10+ (targets 3.10, 3.11, 3.12) + Pydantic v2 (config), Typer (CLI), FastAPI + Uvicorn (Web UI), `claude-agent-sdk` (Claude backend), asyncio (concurrency), loguru (logging)
