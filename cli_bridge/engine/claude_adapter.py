@@ -270,6 +270,8 @@ class ClaudeAdapter(BaseAdapter):
             mcp_servers=mcp_servers,
         )
 
+    _THINKING_SIG_ERROR = "Invalid signature in thinking block"
+
     async def _run(
         self,
         message: str,
@@ -279,8 +281,14 @@ class ClaudeAdapter(BaseAdapter):
         on_chunk: Callable | None = None,
         on_tool_call: Callable | None = None,
         on_event: Callable | None = None,
+        _is_retry: bool = False,
     ) -> str:
-        """Core implementation: run query() and dispatch callbacks."""
+        """Core implementation: run query() and dispatch callbacks.
+
+        If the Anthropic API rejects the resumed session due to an expired
+        thinking-block signature, the stored session_id is cleared and the
+        request is retried once without resumption (_is_retry=True).
+        """
         options = self._build_options(channel, chat_id)
         effective_timeout = timeout or self.timeout
         result_text = ""
@@ -313,7 +321,25 @@ class ClaudeAdapter(BaseAdapter):
                         self.session_mappings.set_session_id(channel, chat_id, msg.session_id)
                         logger.debug(f"Session saved: {channel}:{chat_id} → {msg.session_id}")
 
-        await asyncio.wait_for(_consume(), timeout=effective_timeout)
+        try:
+            await asyncio.wait_for(_consume(), timeout=effective_timeout)
+        except Exception as exc:
+            if not _is_retry and self._THINKING_SIG_ERROR in str(exc):
+                logger.warning(
+                    f"Thinking-block signature expired for {channel}:{chat_id} — "
+                    "clearing session and retrying without resume"
+                )
+                self.session_mappings.clear_session(channel, chat_id)
+                return await self._run(
+                    message, channel, chat_id,
+                    timeout=timeout,
+                    on_chunk=on_chunk,
+                    on_tool_call=on_tool_call,
+                    on_event=on_event,
+                    _is_retry=True,
+                )
+            raise
+
         return result_text
 
     async def chat(

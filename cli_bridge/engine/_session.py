@@ -41,8 +41,12 @@ class SessionMappingManager:
                 self._mappings = {}
 
     def _save(self) -> None:
-        with open(self.mapping_file, "w", encoding="utf-8") as f:
-            json.dump(self._mappings, f, indent=2, ensure_ascii=False)
+        tmp = self.mapping_file.with_suffix(".json.tmp")
+        tmp.write_text(
+            json.dumps(self._mappings, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        tmp.replace(self.mapping_file)
 
     def get_session_id(self, channel: str, chat_id: str) -> str | None:
         key = f"{channel}:{chat_id}"

@@ -1,10 +1,46 @@
 """Utility functions for cli-bridge."""
 
+import re
+import sys
 from pathlib import Path
 from typing import Any
 
 import aiohttp
 from loguru import logger
+
+# ── Secret masking ──
+
+_MASK_PATTERNS: list[tuple[re.Pattern, str]] = [
+    # key=value or key: value  (token, secret, password, api_key, app_secret …)
+    (re.compile(r'((?:token|secret|password|api[_-]?key|app[_-]?secret)["\']?\s*[:=]\s*["\']?)(\S+)', re.I), r'\g<1>***'),
+    # Telegram bot token  123456789:AABbCc...
+    (re.compile(r'\b\d{8,12}:[A-Za-z0-9_-]{20,}\b'), '***:***'),
+    # Slack tokens (xoxb-, xoxp-, xapp-)
+    (re.compile(r'(xox[bpa])-[A-Za-z0-9\-]+', re.I), r'\1-***'),
+    # Bearer / Authorization header
+    (re.compile(r'(Bearer\s+)[A-Za-z0-9._\-]+', re.I), r'\1***'),
+]
+
+
+def mask_secrets(text: str) -> str:
+    """Replace recognisable credential patterns with *** in *text*."""
+    for pattern, replacement in _MASK_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def configure_logging() -> None:
+    """Reconfigure loguru to mask secrets before writing every log record.
+
+    Replaces the default stderr handler with one that runs each message
+    through *mask_secrets* first.  Must be called once at process startup.
+    """
+    def _masking_filter(record: dict) -> bool:
+        record["message"] = mask_secrets(record["message"])
+        return True
+
+    logger.remove()
+    logger.add(sys.stderr, filter=_masking_filter)
 
 
 def get_home_dir() -> Path:

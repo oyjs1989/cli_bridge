@@ -19,6 +19,10 @@ from pathlib import Path
 
 import typer
 
+from cli_bridge.utils.helpers import configure_logging
+
+configure_logging()
+
 from cli_bridge.cli._cron_commands import cron_app
 from cli_bridge.cli._gateway_commands import _run_gateway, gateway_app
 from cli_bridge.cli._helpers import (
